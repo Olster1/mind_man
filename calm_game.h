@@ -27,17 +27,6 @@ struct temp_memory
 #define PushArray(Arena, Type, Size, ...) (Type *)PushSize(Arena, Size*sizeof(Type), __VA_ARGS__)
 #define PushStruct(Arena, Type) (Type *)PushSize(Arena, sizeof(Type))
 
-inline void
-ClearMemory(void *Memory, u32 Size)
-{
-    
-    u8 *At = (u8 *)Memory;
-    
-    while(Size--)
-    {
-        *At++ = 0;
-    }
-}
 
 inline void *
 PushSize(memory_arena *Arena, size_t Size, b32 Clear = true)
@@ -127,6 +116,9 @@ ReleaseMemory(temp_memory *TempMem)
     Assert(TempMem->ID == ID);
     
 }
+
+#define MoveToList(LinkPtr, FreeList, type) type *Next = (*LinkPtr)->Next; (*LinkPtr)->Next = FreeList; FreeList = *LinkPtr; *LinkPtr = Next;
+
 #include "calm_bucket.cpp"
 #include "calm_math.h"
 #include "calm_random.h"
@@ -134,13 +126,7 @@ ReleaseMemory(temp_memory *TempMem)
 #include "calm_console.h"
 #include "calm_sound.h"
 #include "calm_entity.h"
-//#include "calm_render.h"
-
-struct render_group
-{
-    r32 MetersToPixels;
-    v2 ScreenDim;
-};
+#include "calm_render.h"
 
 enum game_mode {
     PLAY_MODE,
@@ -164,14 +150,16 @@ struct animation {
     r32 Qualities[ANIMATE_QUALITY_COUNT];
 };
 
-static r32 WorldChunkInMeters = 40.0f;
+static r32 WorldChunkInMeters = 0.7f;
 
 struct world_chunk {
-    u32 X;
-    u32 Y;
+    s32 X;
+    s32 Y;
+    
+    world_chunk *Next;
 };
 
-#define WORLD_GRID_SIZE 16
+#define WORLD_CHUNK_HASH_SIZE 4096
 
 struct game_state
 {
@@ -183,11 +171,14 @@ struct game_state
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;
     
-    b32 WorldGrid[WORLD_GRID_SIZE*WORLD_GRID_SIZE];
+    //b32 WorldGrid[WORLD_GRID_SIZE*WORLD_GRID_SIZE];
     
     entity *Camera;
     
     loaded_sound BackgroundMusic;
+    
+    search_cell *SearchCellFreeList;
+    search_cell SearchCellSentinel;
     
     entity *Player;
     
@@ -196,7 +187,7 @@ struct game_state
     game_mode GameMode;
     s32 MenuIndex;
     
-    world_chunk Chunks[256]; 
+    world_chunk *Chunks[WORLD_CHUNK_HASH_SIZE]; 
     
     entity *InteractingWith;
     entity *HotEntity;

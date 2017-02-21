@@ -66,6 +66,7 @@ Win32GetClientDimension(HWND WindowHandle)
     return Result;
 }
 
+global_variable game_button GameKeys[256];
 
 LRESULT CALLBACK
 Win32MainWindowCallBack(
@@ -92,7 +93,17 @@ LPARAM lParam)
             
             
         } break;
-        
+        case WM_CHAR: {
+            b32 IsUp = lParam & (1 << 31);
+            b32 WasDown = lParam & (1 << 30);
+            
+            game_button *Button = GameKeys + wParam;
+            Button->IsDown = !IsUp;
+            if(WasDown == IsUp) {
+                Button->FrameCount++;
+            }
+            
+        } break;
         case WM_SIZE:
         {
             
@@ -638,6 +649,9 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             
             game_memory GameMemory = {};
             GameMemory.GameStorageSize = GigaBytes(1);
+            GameMemory.GameKeys = GameKeys;
+            GameMemory.SizeOfGameKeys = ArrayCount(GameKeys);
+            
             
             u32 TotalStorageSize = GameMemory.GameStorageSize;
             
@@ -665,6 +679,8 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             
             while(GlobalRunning)
             {
+                ClearMemory(GameKeys, sizeof(GameKeys));
+                
                 MSG Message;
                 while(PeekMessage(&Message, WindowHandle, 0, 0, PM_REMOVE))
                 {
@@ -689,7 +705,6 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                     GameMemory.GameButtons[Index].FrameCount = 0;                   
                 }
                 
-                
                 GetButtonState(GameMemory.GameButtons + Button_Up, VK_UP, 0x57);
                 GetButtonState(GameMemory.GameButtons + Button_Down, VK_DOWN, 0x53);
                 GetButtonState(GameMemory.GameButtons + Button_Left, VK_LEFT, 0x41);
@@ -699,11 +714,15 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 GetButtonState(GameMemory.GameButtons + Button_Enter, VK_RETURN);
                 GetButtonState(GameMemory.GameButtons + Button_Shift, VK_SHIFT);
                 
+                GetButtonState(GameMemory.GameButtons + Button_F1, VK_F1);
+                
+                
+                GetButtonState(GameMemory.GameButtons + Button_F2, VK_F2);
+                
                 GetButtonState(GameMemory.GameButtons + Button_LeftMouse, VK_LBUTTON);
                 GetButtonState(GameMemory.GameButtons + Button_RightMouse, VK_RBUTTON);
                 
-#include "calm_meta.h"
-                
+#include "meta_key_functions.h"
                 
                 POINT CursorPos;
                 GetCursorPos(&CursorPos);

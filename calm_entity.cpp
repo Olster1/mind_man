@@ -402,8 +402,9 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type)
     
     *Entity = {};
     Entity->Velocity = {};
-    Entity->MovePeriod = 4.0f;
-    Entity->Pos = Entity->StartPos = Entity->TargetPos = Pos;
+    Entity->MovePeriod = 0.5f;
+    Entity->Pos = Pos;
+    //Entity->StartPos = Entity->TargetPos;
     Entity->Dim = Dim;
     Entity->Index = EntityIndex;
     Entity->LifePoints = -1;

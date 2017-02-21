@@ -1,3 +1,5 @@
+ #include "stdio.h"
+ 
  internal void
      ToString(s32 Value, char **TextBufferPtr, u32 TextBufferSize)
  {
@@ -99,7 +101,7 @@
      
  }
  
-#define NextArgument(Arguments, type) *((type *)Arguments); Arguments = Arguments + sizeof(type); 
+#define NextArgument(Arguments, type) (*((type *)(Arguments))); Arguments += ((sizeof(type) + (sizeof(u64) - 1)) & ~(sizeof(u64) - 1)); 
  
  
 #define Print(Array, ...) Print_(Array, sizeof(Array), ##__VA_ARGS__);
@@ -107,7 +109,6 @@
  internal s32
      Print__(char *TextBuffer, u32 TextBufferSize, char *FormatString, u8 *Arguments, b32 NullTerminate = true)
  {
-     
      char *TextBufferAt = TextBuffer;
      char *At = FormatString;
      
@@ -136,12 +137,12 @@
                  } break;
                  case 'd':
                  {
-                     s32 Argument = NextArgument(Arguments, s32); 
+                     s32 Argument = NextArgument(Arguments, s64); 
                      ToString(Argument, &TextBufferAt, SizeRemaining);
                  } break;
                  case 'f':
                  {
-                     r64 Argument = NextArgument(Arguments, r64); 
+                     r32 Argument = NextArgument(Arguments, r64); 
                      ToString((r32)Argument, &TextBufferAt, SizeRemaining, PlacesPtr);
                      
                      PlacesPtr = 0;
@@ -190,5 +191,6 @@
      
      u8 *Arguments = ((u8 *)&FormatString) + sizeof(FormatString);
      
+     //sprintf_s(TextBuffer, TextBufferSize, FormatString, *Arguments);
      Print__(TextBuffer, TextBufferSize, FormatString, Arguments);
  }

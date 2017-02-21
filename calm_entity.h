@@ -8,26 +8,42 @@ enum entity_type
     
 };
 
+enum search_type {
+    SEARCH_VALID_SQUARES,
+    SEARCH_INVALID_SQUARES,
+};
+
+struct search_cell {
+    v2i Pos;
+    v2i CameFrom;
+    
+    search_cell *Prev;
+    search_cell *Next;
+};
+
+struct path_nodes {
+    v2i Points[512];
+    u32 Count;
+};
+
 struct entity
 {
     v2 Pos;
     v2 Velocity;
     v2 Dim;
     
-    v2 StartPos;
+    path_nodes Path;
     
-    v2 TempTargetPos;
+    u32 VectorIndexAt;
     
-    v2 TargetPos;
     v2 OffsetTargetP;
+    
     r32 MoveT;
     r32 MovePeriod;
     
     s32 LifePoints;
     mat2 Rotation;
     r32 FacingDirection;    
-    
-    b32 Moving;
     
     u32 Type;
     b32 Moves;

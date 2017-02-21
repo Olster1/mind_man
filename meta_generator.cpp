@@ -52,7 +52,7 @@ static void *ReadFileWithNullTerminator(char *FileName)
     }
     else
     {
-        
+        Assert(!"Couldn't open file");
     }
     
     fclose(FileHandle);
@@ -61,10 +61,20 @@ static void *ReadFileWithNullTerminator(char *FileName)
     
 }
 
+enum file_handle {
+    KEY_FUNCTIONS_FILE,
+    KEY_TYPES_FILE, 
+    META_FILE,
+    
+    FILE_HANDLE_COUNT
+};
+
 struct tokenizer
 {
     u8 *At;
     b32 ReachedEndOfStream;
+    
+    FILE *FileHandles[FILE_HANDLE_COUNT];
 };
 
 
@@ -105,6 +115,8 @@ struct token
     char *Text;
     u32 TextLength;
     
+    u32 FileFlags;
+    
 };
 
 static void EatAllWhiteSpace(tokenizer *Tokenizer)
@@ -139,6 +151,31 @@ inline b32 IsAlphaNumeric(char Character)
 {
     b32 Result = ((Character >= 'A' && Character <= 'Z') || 
                   (Character >= 'a' && Character <= 'z') || Character == '_');
+    return Result;
+}
+
+static u32 StringLength(char *A) {
+    u32 Result = 0;
+    
+    while (*A++)
+    {
+        Result++;
+    }
+    
+    return Result;
+}
+
+static b32 StringCompare(char *A, char *B) {
+    b32 Result = true;
+    while (*A && *B)
+    {
+        Result &= (*A == *B);
+        A++;
+        B++;
+    }
+    
+    Result &= (*A == *B);
+    
     return Result;
 }
 
@@ -362,6 +399,49 @@ AddVariableElement(token *Token, tree_element *ParentElement)
     return Result;
 }
 
+struct string {
+    char *E;
+    u32 Length;
+};
+
+struct expanded_words {
+    u32 Count;
+    string Strings[128];
+};
+
+
+static expanded_words ExpandOnUnderscore(char *Text, u32 Length) {
+    expanded_words Result = {};
+    b32 NewWord = true;
+    string *LastString = 0;
+    char *At = Text;
+    for(u32 i = 0; i < Length; i++){
+        if(NewWord) {
+            if(Result.Count < ArrayCount(Result.Strings)) {
+                string *Str = Result.Strings + Result.Count++;
+                Str->E = At;
+                Str->Length = 0;
+                LastString = Str;
+                NewWord = false;
+            }
+        }
+        if(*At == '_') {
+            NewWord = true;
+            if(LastString) {
+                LastString->Length = (At - LastString->E);
+            }
+        }
+        
+        At++;
+    }
+    
+    if(LastString) {
+        LastString->Length = (At - LastString->E);
+    }
+    
+    return Result;
+}
+
 static void
 ParseKeyFunction(tokenizer *Tokenizer, token Token)
 {
@@ -374,10 +454,30 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
     Token = GetNextToken(Tokenizer);
     Assert(Token.Type == Token_BeginParentThesis);
     
+    b32 LastTokenWasPlus = false;
+    
     u32 CommaCount = 0;
     while(Token.Type != Token_SemiColon)
     {
         Token = GetNextToken(Tokenizer);
+        if(LastTokenWasPlus) {
+            LastTokenWasPlus = false;
+            
+            expanded_words Words = ExpandOnUnderscore(Token.Text, Token.TextLength);
+            char cb[256];
+            string Str = Words.Strings[Words.Count - 1];
+            if(Str.Length == 1) {
+                sprintf_s(cb, sizeof(cb), "{%.*s, '%.*s'}, ", Token.TextLength, Token.Text, Str.Length, Str.E);
+                
+                fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[META_FILE]);
+                
+            }
+            
+            char cb1[256];
+            sprintf_s(cb1, sizeof(cb1), "%.*s,\n", Token.TextLength, Token.Text);
+            
+            fwrite(cb1, StringLength(cb1), 1, Tokenizer->FileHandles[KEY_TYPES_FILE]);
+        }
         
         if(Token.Type == Token_Comma)
         {
@@ -388,6 +488,8 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
             }
             
             CommaCount++;
+        } else if(Token.Type == Token_Plus) {
+            LastTokenWasPlus = true;
         }
     }
     
@@ -396,7 +498,12 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
     u32 TextLength0 = (u32)(TextEnd0 - TextStart0);
     u32 TextLength1 = (u32)(TextEnd1 - TextStart1);
     u32 TextLength2 = (u32)((char *)Tokenizer->At - TextStart2);
-    printf("%.*s_%.*s, %.*s%.*s\n", TextLength0, TextStart0, TextLength1, TextStart1, 1, ParameterCountAsString, TextLength2, TextStart2);
+    
+    char cb[256];
+    sprintf_s(cb,sizeof(cb), "%.*s_%.*s, %.*s%.*s\n", TextLength0, TextStart0, TextLength1, TextStart1, 1, ParameterCountAsString, TextLength2, TextStart2);
+    
+    fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[KEY_FUNCTIONS_FILE]);
+    
     
 }
 
@@ -975,23 +1082,54 @@ EVALUTE_GROUP(EvaluateGroup)
     
 }
 
+static FILE *OpenFileHandle(char *FileName) {
+    FILE *FileHandle;
+    fopen_s(&FileHandle, FileName, "w+");
+    //Assert(FileHandle);
+    return FileHandle;
+} 
+
 int main(int argc, char* argv[])
 {
+    
     void *File = ReadFileWithNullTerminator("calm_win32.cpp");
     tokenizer Tokenizer = {};
     Tokenizer.At = (u8 *)File;
     Tokenizer.ReachedEndOfStream = false;
     
+    Tokenizer.FileHandles[KEY_TYPES_FILE] = OpenFileHandle("meta_keys.h");
+    Tokenizer.FileHandles[META_FILE] = OpenFileHandle("calm_meta.h");
+    Tokenizer.FileHandles[KEY_FUNCTIONS_FILE] = OpenFileHandle("meta_key_functions.h");
+    
+    
     stack Stack = {};
     InitializeMemoryArena(&Stack.WorkSpace, MegaBytes(2));
     InitializeMemoryArena(&Stack.VariableMemory, MegaBytes(2), true);
     
+    /*
+    // NOTE(OLIVER): This was for when we were getting the key state for the keyboard using async. This had its downfall in that it didn't have the automatic wait windows puts in if you hold down the key. As well it was cumbersome have types for all the keys and trying to convert them into the character we wanted. Overall the system we were using for all the keys is not what we wanted. Instead we just have an 256 sized array and the asci/utf-8 value automatically maps to it. ahhh... so much easier allowing windows to do the work. Oliver 15/02/17 
+    
+    char *Str = "struct button_to_char_key {\n    game_button_type Type;\n    char Value;\n};\nbutton_to_char_key ButtonToChar[] = {";
+    
+    fwrite(Str, StringLength(Str), 1, Tokenizer.FileHandles[META_FILE]);
+    
+    //// after we have finished parsing ///////
+    
+    Str = "};";
+    fseek(Tokenizer.FileHandles[META_FILE], -2, SEEK_CUR);
+    fwrite(Str, StringLength(Str), 1, Tokenizer.FileHandles[META_FILE]);
+    
+    */
     
     while (Tokenizer.At && !Tokenizer.ReachedEndOfStream)
     {
         ParseLine(&Tokenizer);
     }
     
+    
+    for(u32 i = 0; i < ArrayCount(Tokenizer.FileHandles); ++i) {
+        fclose(Tokenizer.FileHandles[i]);
+    }
     
     return 0;
 }

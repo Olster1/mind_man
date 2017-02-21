@@ -3,7 +3,7 @@
                         *Console = {};
                         Console->OutputFont = Console->InputFont = Font;
                         Console->Buffer = Buffer;
-                        Console->Visible = false;
+                        Console->ViewMode = VIEW_CLOSE;
                         
                     } 
                     
@@ -48,9 +48,20 @@
                         v4 Color = V4(1, 1, 1, 1);
                         
                         r32 Margin = 10;
+                        r32 OutPutBufferSize;
+                        switch(Console->ViewMode) {
+                            case VIEW_CLOSE: {
+                                OutPutBufferSize = 0;
+                            } break;
+                            case VIEW_MID: {
+                                OutPutBufferSize = 0.4f*Buffer->Height;
+                            } break;
+                            case VIEW_FULL: {
+                                OutPutBufferSize = 0.8f*Buffer->Height;
+                            } break;
+                        }
                         
-                        r32 InputBufferSize = 100;
-                        rect2 OutputBounds = Rect2(0, Buffer->Height - InputBufferSize, Buffer->Width, Buffer->Height);
+                        rect2 OutputBounds = Rect2(0, Buffer->Height - OutPutBufferSize, Buffer->Width, Buffer->Height);
                         
                         rect2 InputBounds = Rect2(0, OutputBounds.MinY - Console->InputFont->LineAdvance - Margin, Buffer->Width, OutputBounds.MinY);
                         
@@ -64,7 +75,7 @@
                         char_buffer *Out = &Console->Output;
                         s32 OutSize = sizeof(Out->Chars) - Out->IndexAt;
                         
-                        // TODO(OLIVER): parse until new line to make it look neater with the rolling buffer!!! Oliver 13/2/17
+                        // TODO(OLIVER): parse until new line to make it look neater with the rolling buffer!!! 
                         
                         v2i CursorA = TextToOutput(Console->Buffer, Console->OutputFont, Out->Chars + Out->IndexAt, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), false, 1, OutSize);
                         
@@ -77,15 +88,17 @@
                         Cursor = TextToOutput(Console->Buffer, Console->OutputFont, Out->Chars, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), true, -1, Out->IndexAt);
                         
                         Assert(Cursor.Y == OutputBounds.Min.Y);
-                        /*
-                        Cursor = ToV2i(InputBounds.Min);
                         
+                        Cursor = ToV2i(InputBounds.Min);
                         
                         char_buffer *In = &Console->Input;
                         s32 InSize = sizeof(In->Chars) - In->IndexAt;
                         
-                        TextToOutput(Console->Buffer, Console->InputFont, In->Chars + In->IndexAt, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), true, -1, InSize);
                         
-                        TextToOutput(Console->Buffer, Console->InputFont, In->Chars, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), true, -1, In->IndexAt);
-                        */
+                        Cursor = ToV2i(Bounds.Min);
+                        
+                        Cursor = TextToOutput(Console->Buffer, Console->InputFont, In->Chars + In->IndexAt, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), true, -1, OutSize, false);
+                        
+                        Cursor = TextToOutput(Console->Buffer, Console->InputFont, In->Chars, Cursor.X, Cursor.Y, Bounds, V4(0, 0, 0, 1), true, -1, In->IndexAt, false);
+                        
                     }

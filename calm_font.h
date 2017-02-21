@@ -169,10 +169,10 @@ GetCharacterAdvanceFor(font *Font, char LastCodePoint, char ThisCodePoint)
     return Result;
 }
 
-inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, s32 *XCursor, s32 *YCursor, u32 BufferWidth, r32 LineAdvanceModifier) {
+inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, s32 *XCursor, s32 *YCursor, u32 BufferWidth, r32 LineAdvanceModifier, b32 NewLineSensitive) {
     
     s32 XAdvanceForLetter = GetCharacterAdvanceFor(Font, LastCodePoint, CheesePoint);
-    if((XAdvanceForLetter + *XCursor) > (s32)BufferWidth || CheesePoint == '\n')
+    if((XAdvanceForLetter + *XCursor) > (s32)BufferWidth || CheesePoint == '\n' && NewLineSensitive)
     {
         *XCursor = 0;
         *YCursor += LineAdvanceModifier*GetLineAdvance(Font);
@@ -189,7 +189,7 @@ internal void DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrig
 
 // TODO(OLIVER): Compress this into a more reusable component i.e. text metrics and draw text.
 internal v2i
-TextToOutput(bitmap *Buffer, font *Font, char *String, s32 XCursor, s32 YCursor, rect2 Bounds, v4 Color, b32 DrawText = true, r32 LineAdvanceModifier = -1,  u32 OptionalLetterCount = INT_MAX) {
+TextToOutput(bitmap *Buffer, font *Font, char *String, s32 XCursor, s32 YCursor, rect2 Bounds, v4 Color, b32 DrawText = true, r32 LineAdvanceModifier = -1,  u32 OptionalLetterCount = INT_MAX, b32 NewLineSensitive = true) {
     //NOTE(OLIVER): We had this so we can move upwards when writing text
     char LastCodePoint = 0;
     
@@ -200,14 +200,14 @@ TextToOutput(bitmap *Buffer, font *Font, char *String, s32 XCursor, s32 YCursor,
     {
         char CheesePoint = *Letter; // TODO(OLIVER): Handle UTF-8 strings!
         
-        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier);
+        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier, NewLineSensitive);
         if(DrawText) {
             DrawBitmap(Buffer, GetFontGlyphBitmap(Font, CheesePoint), XCursor, YCursor, Bounds, Color);
         }
         LastCodePoint = CheesePoint;                
     }
     
-    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier);
+    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier, NewLineSensitive);
     
     v2i CursorP = V2int(XCursor, YCursor);
     return  CursorP;

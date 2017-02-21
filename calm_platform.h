@@ -108,6 +108,18 @@ typedef PLATFORM_READ_FILE(platform_read_file);
 #define PLATFORM_FILE_SIZE(name) size_t name(char *FileName)
 typedef PLATFORM_FILE_SIZE(platform_file_size);
 
+inline void
+ClearMemory(void *Memory, u32 Size)
+{
+    
+    u8 *At = (u8 *)Memory;
+    
+    while(Size--)
+    {
+        *At++ = 0;
+    }
+}
+
 
 inline void
 CopyStringToBuffer(char *Buffer, u32 BufferSize, char *StringToCopy)
@@ -141,18 +153,9 @@ struct bitmap
 #define WasReleased(button_input) (!button_input.IsDown && button_input.FrameCount > 0)
 #define IsDown(button_input) (button_input.IsDown)
 
-enum game_button_type
-{
-    Button_LeftMouse,
-    Button_RightMouse,
-    Button_Left,
-    Button_Right,
-    Button_Up,
-    Button_Down,
-    Button_Space,
-    Button_Escape,
-    Button_Enter,
-    Button_Shift,
+#define BUTTON_INFO 1
+enum game_button_type {
+#include "meta_keys.h"
     
     //Make sure this is at the end
     Button_Count
@@ -169,6 +172,9 @@ struct game_memory
 {
     void *GameStorage;
     u32 GameStorageSize;
+    
+    game_button *GameKeys;
+    u32 SizeOfGameKeys;
     
     platform_read_entire_file *PlatformReadEntireFile;
     platform_read_file *PlatformReadFile;

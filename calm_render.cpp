@@ -438,3 +438,107 @@ DrawRectangle(bitmap *Buffer, rect2 Rect, v4 Color01)
     DrawLine(Buffer, GetMaxCorner(Rect).X, GetMinCorner(Rect).Y,
              GetMaxCorner(Rect).X, GetMaxCorner(Rect).Y, Color255);
 }
+
+inline v2 Transform(render_group *Group, v2 Pos) {
+    v2 Result = Group->MetersToPixels * Pos;
+    Result += 0.5f*Group->ScreenDim;
+    return Result;
+}
+
+inline rect2 Transform(render_group *Group, rect2 Dim) {
+    rect2 Result = Rect2MinMax(Transform(Group, Dim.Min), Transform(Group, Dim.Max)); 
+    return Result;
+}
+
+inline v2 InverseTransform(render_group *Group, v2 Pos) {
+    
+    v2 Result = Pos - 0.5f*Group->ScreenDim;
+    Result *= 1.0f / Group->MetersToPixels;
+    
+    return Result;
+} 
+
+void PushClear(render_group *Group, v4 Color) {
+    render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_clear) + sizeof(render_element_header));
+    
+    Header->Type = render_clear;
+    render_element_clear *Info = (render_element_clear *)(Header + 1);
+    Info->Color = Color;
+}
+
+void PushRectOutline(render_group *Group, rect2 Dim, v4 Color) {
+    render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_rect_outline) + sizeof(render_element_header));
+    
+    Header->Type = render_rect_outline;
+    render_element_rect_outline *Info = (render_element_rect_outline *)(Header + 1);
+    
+    Info->Dim = Transform(Group, Dim);
+    Info->Color = Color;
+}
+
+void PushBitmap(render_group *Group, v2 Pos, bitmap *Bitmap, rect2 ClipRect) {
+    render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
+    
+    Header->Type = render_bitmap;
+    render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
+    
+    Info->Pos = Transform(Group, Pos);
+    Info->Bitmap = Bitmap;
+    Info->ClipRect = ClipRect;
+}
+
+void PushRect(render_group *Group, rect2 Dim, v4 Color) {
+    render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_rect) + sizeof(render_element_header));
+    
+    Header->Type = render_rect;
+    render_element_rect *Info = (render_element_rect *)(Header + 1);
+    
+    Info->Dim = Transform(Group, Dim);
+    Info->Color = Color;
+}
+
+void RenderGroupToOutput(render_group *Group) {
+    u8 *Base = (u8 *)Group->Arena.Base;
+    u8 *At = Base;
+    
+    rect2 BufferRect = Rect2(0, 0, Group->ScreenDim.X, Group->ScreenDim.Y);
+    while((At - Base) < Group->Arena.CurrentSize) {
+        render_element_header *Header = (render_element_header *)At;
+        switch(Header->Type) {
+            case render_clear: {
+                render_element_clear *Info = (render_element_clear *)(Header + 1);
+                
+                ClearBitmap(Group->Buffer, Info->Color);
+                
+                At += sizeof(render_element_header) + sizeof(render_element_clear);
+            } break;
+            case render_bitmap: {
+                render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
+                
+                DrawBitmap(Group->Buffer, Info->Bitmap, Info->Pos.X, Info->Pos.Y, Info->ClipRect);
+                
+                At += sizeof(render_element_header) + sizeof(render_element_bitmap);
+            } break;
+            case render_rect: {
+                render_element_rect *Info = (render_element_rect *)(Header + 1);
+                
+                FillRectangle(Group->Buffer, Info->Dim, Info->Color);
+                
+                At += sizeof(render_element_header) + sizeof(render_element_rect);
+            } break;
+            case render_rect_outline: {
+                render_element_rect_outline *Info = (render_element_rect_outline *)(Header + 1);
+                
+                DrawRectangle(Group->Buffer, Info->Dim, Info->Color);
+                
+                At += sizeof(render_element_header) + sizeof(render_element_rect_outline);
+            } break;
+            default: {
+                InvalidCodePath;
+            }
+        }
+        Assert((At - Base) >= 0);
+    }
+    
+    ReleaseMemory(&Group->TempMem);
+}

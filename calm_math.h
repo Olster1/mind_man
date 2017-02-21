@@ -230,6 +230,13 @@ inline r32 Clamp(r32 Min, r32 Value, r32 Max) {
     return Value;
 }
 
+inline s32
+Abs(s32 Value)
+{
+    s32 Result = (Value < 0) ? Value*-1 : Value;
+    return Result;
+}
+
 //NOTE(oliver): matrix2 operations
 inline v2
 Multiply(v2 A, mat2 B)
@@ -387,6 +394,13 @@ inline b32
 operator == (v2i A, v2i B)
 {
     b32 Result = (A.X == B.X) && (A.Y == B.Y);
+    return Result;
+}
+
+inline b32
+operator != (v2i A, v2i B)
+{
+    b32 Result = !((A.X == B.X) && (A.Y == B.Y));
     return Result;
 }
 

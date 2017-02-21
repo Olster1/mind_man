@@ -13,6 +13,7 @@
 #include "calm_print.cpp"
 #include "calm_console.cpp"
 #include "calm_entity.cpp"
+#include "calm_meta.h"
 
 internal void InitAnimation(animation *Animation, game_memory *Memory,  char **FileNames, u32 FileNameCount, r32 DirectionValue, r32 PoseValue) {
     Animation->Qualities[POSE] = PoseValue;
@@ -59,30 +60,52 @@ internal animation *GetAnimation(animation *Animations, u32 AnimationsCount,  r3
         }
     }
     
+    Assert(BestResult);
     return BestResult;
 }
 
-struct search_cell {
-    u32 X; 
-    u32 Y;
+#define GetChunkHash(X, Y) (Abs(X*19 + Y*23) % WORLD_CHUNK_HASH_SIZE)
+internal world_chunk *GetWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena) {
+    u32 HashIndex = GetChunkHash(X, Y);
+    world_chunk *Chunk = Chunks[HashIndex];
+    world_chunk *Result = 0;
     
-    search_cell *Prev;
-    search_cell *Next;
-};
+    while(Chunk) {
+        
+        if(Chunk->X == X && Chunk->Y == Y) {
+            Result = Chunk;
+            break;
+        }
+        
+        Chunk = Chunk->Next;
+    } 
+    
+    if(!Result && Arena) {
+        Result  = PushStruct(Arena, world_chunk);
+        Result->X = X;
+        Result->Y = Y;
+        Result->Next = Chunks[HashIndex];
+        Chunks[HashIndex] = Result;
+    }
+    return Result;
+}
 
-inline void PushOnToList(search_cell **SentinelPtr, u32 X, u32 Y, memory_arena *Arena, search_cell **FreelistPtr) {
+inline void PushOnToList(search_cell **SentinelPtr, s32 X, s32 Y, s32 CameFromX, s32 CameFromY,  memory_arena *Arena, search_cell **FreeListPtr) {
     search_cell *Sentinel = *SentinelPtr;
     
-    search_cell *NewCell = *FreelistPtr;
+    search_cell *NewCell = *FreeListPtr;
     
     if(NewCell) {
-        *FreelistPtr = (*FreelistPtr)->Next;
+        *FreeListPtr = (*FreeListPtr)->Next;
     } else {
         NewCell = PushStruct(Arena, search_cell);
     }
     
-    NewCell->X = X;
-    NewCell->Y = Y;
+    NewCell->Pos.X = X;
+    NewCell->Pos.Y = Y;
+    
+    NewCell->CameFrom.X = CameFromX;
+    NewCell->CameFrom.Y = CameFromY;
     
     NewCell->Next = Sentinel->Next;
     NewCell->Prev = Sentinel;
@@ -94,75 +117,219 @@ inline void PushOnToList(search_cell **SentinelPtr, u32 X, u32 Y, memory_arena *
 inline void RemoveOffList(search_cell **SentinelPtr, search_cell *CellToRemove, search_cell **FreelistPtr) {
     search_cell *Sentinel = *SentinelPtr;
     
-    Assert(Sentinel->Prev == CellToRemove);
-    Sentinel->Prev->Prev->Next = Sentinel;
-    Sentinel->Prev = Sentinel->Prev->Prev;
+    Assert(CellToRemove != Sentinel);
+    
+    CellToRemove->Next->Prev = CellToRemove->Prev;
+    CellToRemove->Prev->Next = CellToRemove->Next;
     
     CellToRemove->Next = *FreelistPtr;
     *FreelistPtr = CellToRemove;
+    CellToRemove->Prev = 0;
     
 }
 
-internal void UpdatePieceOfEntityPosViaFunction(entity *Entity, r32 dt) {
-    Entity->Pos = Lerp(Entity->StartPos, Entity->MoveT / Entity->MovePeriod, Entity->TempTargetPos);
+inline b32 PushToList(game_state *GameState, s32 X, s32 Y, s32 CameFromX, s32 CameFromY,  world_chunk **VisitedHash, search_cell **SentinelPtr, search_cell **FreeListPtr, v2i TargetP, 
+                      memory_arena *TempArena, search_type SearchType) {
+    b32 Found = false;
     
-    v2 Direction = Normal(Entity->TargetPos - Entity->Pos);
-    Entity->Velocity = 20.0f*Direction;
-    Entity->MoveT += dt;
-    if(Entity->MoveT / Entity->MovePeriod >= 1.0f) {
-        Entity->Pos = Entity->TempTargetPos;
-        Entity->Moving = false;
-        Entity->MoveT = 0;
+    switch(SearchType) {
+        case SEARCH_VALID_SQUARES: {
+            if(GetWorldChunk(GameState->Chunks, X, Y, 0) && !GetWorldChunk(VisitedHash, X, Y, 0)) {   
+                
+                GetWorldChunk(VisitedHash, X, Y, TempArena);
+                if(X == TargetP.X && Y == TargetP.Y) { 
+                    Found = true;
+                } 
+                PushOnToList(SentinelPtr, X, Y, CameFromX, CameFromY, TempArena, FreeListPtr); 
+            }
+        } break;
+        case SEARCH_INVALID_SQUARES: {
+            if(!GetWorldChunk(VisitedHash, X, Y, 0)) {   
+                GetWorldChunk(VisitedHash, X, Y, TempArena);
+                if(GetWorldChunk(GameState->Chunks, X, Y, 0)) {
+                    Found = true;
+                }  
+                PushOnToList(SentinelPtr, X, Y, CameFromX, CameFromY, TempArena, FreeListPtr); 
+            }
+        } break;
+        default: {
+            InvalidCodePath;
+        }
+    }
+    
+    
+    return Found;
+}
+
+struct search_info {
+    search_cell *SearchCellList;
+    world_chunk **VisitedHash;
+    
+    search_cell *Sentinel;
+    
+    b32 Found;
+    
+    b32 Initialized;
+};
+
+inline void InitSearchInfo(search_info *Info, v2i StartP,  game_state *GameState, memory_arena *TempArena) {
+    Info->SearchCellList = 0;
+    Info->VisitedHash = PushArray(TempArena, world_chunk *, ArrayCount(GameState->Chunks), true);
+    
+    Info->Sentinel = &GameState->SearchCellSentinel;
+    
+    Info->Sentinel->Next = Info->Sentinel->Prev = Info->Sentinel;
+    
+    Info->Found = false;
+    
+    Info->Initialized = true;
+}
+
+internal search_cell *CalculatePath(game_state *GameState, v2i StartP, v2i EndP,
+                                    memory_arena *TempArena, search_type SearchType, search_info *Info) {
+    
+    s32 AtX = StartP.X;
+    s32 AtY = StartP.Y;
+    
+#define PUSH_TO_LIST(X, Y) if(!Info->Found) {Info->Found = PushToList(GameState, X, Y, AtX, AtY, Info->VisitedHash, &Info->Sentinel, &GameState->SearchCellFreeList, EndP, TempArena, SearchType); }
+    
+    if(!Info->Initialized) {
+        InitSearchInfo(Info, StartP, GameState, TempArena);
+        PUSH_TO_LIST(AtX, AtY);
+    }
+    
+    
+    search_cell *Cell = 0;
+    while(Info->Sentinel->Prev != Info->Sentinel && !Info->Found) {
+        Cell = Info->Sentinel->Prev;
+        AtX = Cell->Pos.X;
+        AtY = Cell->Pos.Y;
         
-        AddToOutBuffer("Temp: [%f: %f]\n", Entity->TempTargetPos.X, Entity->TempTargetPos.Y);
-        AddToOutBuffer("Target: [%f: %f]\n", Entity->TargetPos.X, Entity->TargetPos.Y);
-        if(Entity->TempTargetPos == Entity->TargetPos) {
-            Entity->Velocity = {};
-            
+        PUSH_TO_LIST((AtX + 1), AtY);
+        PUSH_TO_LIST((AtX - 1), AtY);
+        PUSH_TO_LIST(AtX, (AtY + 1));
+        PUSH_TO_LIST(AtX, (AtY - 1));
+        PUSH_TO_LIST((AtX + 1), (AtY + 1));
+        PUSH_TO_LIST((AtX + 1), (AtY - 1));
+        PUSH_TO_LIST((AtX - 1), (AtY + 1));
+        PUSH_TO_LIST((AtX - 1), (AtY - 1));
+        
+        RemoveOffList(&Info->Sentinel, Cell, &Info->SearchCellList);
+    }
+    
+    RemoveOffList(&Info->Sentinel, Info->Sentinel->Next, &Info->SearchCellList);
+    
+    return Info->SearchCellList;
+}
+
+internal void RetrievePath(game_state *GameState, v2i StartP, v2i EndP, path_nodes *Path) {
+    
+    
+    memory_arena *TempArena = &GameState->ScratchPad;
+    temp_memory TempMem = MarkMemory(TempArena);
+    search_info SearchInfo = {};
+    
+    search_cell *SearchCellList = CalculatePath(GameState, StartP, EndP, TempArena,  SEARCH_VALID_SQUARES, &SearchInfo);
+    
+    Assert(SearchInfo.Found);
+    
+    search_cell *Cell = SearchCellList;
+    
+    //Compile path taken to get to the destination
+    v2i LookingFor = Cell->Pos;
+    while(SearchCellList) {
+        b32 Found = false;
+        for(search_cell **TempCellPtr = &SearchCellList; *TempCellPtr; TempCellPtr = &(*TempCellPtr)->Next) {
+            search_cell *TempCell = *TempCellPtr;
+            if(TempCell->Pos.X == LookingFor.X && TempCell->Pos.Y == LookingFor.Y) {
+                Assert(Path->Count < ArrayCount(Path->Points));
+                Path->Points[Path->Count++] = LookingFor;
+                LookingFor = TempCell->CameFrom;
+                *TempCellPtr = TempCell->Next;
+                Found = true;
+                break;
+            }
+        }
+        
+        if(!Found) {
+            break;
+        }
+    }
+    
+    ReleaseMemory(&TempMem);
+}
+
+internal v2i GetClosestPosition(game_state *GameState, v2i TargetP, v2i StartP) {
+    
+    v2i Result = {};
+    memory_arena *TempArena = &GameState->ScratchPad;
+    temp_memory TempMem = MarkMemory(TempArena);
+    
+    search_info SearchInfo = {};
+    //STAGE 2: islands;
+    search_cell *SearchCellList = CalculatePath(GameState, TargetP, StartP, TempArena,  SEARCH_INVALID_SQUARES, &SearchInfo);
+    
+    search_cell *Cell = SearchCellList;
+    Assert(SearchInfo.Found);
+    
+    Assert(GetWorldChunk(GameState->Chunks, Cell->Pos.X, Cell->Pos.Y, 0));
+    
+    Result = Cell->Pos;
+    
+    ReleaseMemory(&TempMem);
+    return Result;
+}
+
+inline void BeginEntityPath(game_state *GameState, entity *Entity, v2i TargetP) {
+    v2i StartP = V2int(Entity->Pos.X / WorldChunkInMeters, Entity->Pos.Y / WorldChunkInMeters);
+    
+    TargetP = GetClosestPosition(GameState, TargetP, StartP);
+    
+    Entity->Path.Count = 0;
+    RetrievePath(GameState, TargetP, StartP, &Entity->Path);
+    Entity->VectorIndexAt = 1;
+}
+
+internal void UpdateEntityPositionViaFunction(game_state *GameState, entity *Entity, r32 dt) {
+    if(Entity->VectorIndexAt < Entity->Path.Count) {
+        Assert(Entity->VectorIndexAt > 0);
+        v2 A = WorldChunkInMeters*ToV2(Entity->Path.Points[Entity->VectorIndexAt - 1]);
+        v2 B = WorldChunkInMeters*ToV2(Entity->Path.Points[Entity->VectorIndexAt]);
+        
+        Entity->MoveT += dt;
+        
+        r32 tValue = Clamp(0,Entity->MoveT / Entity->MovePeriod, 1);
+        Entity->Pos = Lerp(A, tValue, B);
+        
+        v2 Direction = Normal(B - A);
+        Entity->Velocity = 20.0f*Direction;
+        
+        if(Entity->MoveT / Entity->MovePeriod >= 1.0f) {
+            Entity->Pos = B;
+            Entity->MoveT -= Entity->MovePeriod;
+            Entity->VectorIndexAt++;
             
         }
     }
 }
 
-internal void UpdateEntityPosViaFunction(entity *Entity, r32 dt) {
-    Entity->Pos = SineousLerp0To1(Entity->StartPos, Entity->MoveT / Entity->MovePeriod, Entity->TargetPos);
+internal b32 IsPartOfPath(s32 X, s32 Y, path_nodes *Path) {
+    b32 Result = false;
+    for(u32 PathIndex = 0; PathIndex < Path->Count; ++PathIndex){
+        if(Path->Points[PathIndex].X == X && Path->Points[PathIndex].Y == Y) {
+            Result = true;
+            break;
+        }
+    }
     
-    r32 TValue = Length(Entity->Pos - Entity->StartPos) / Length(Entity->TargetPos - Entity->StartPos); 
-    
-    v2 Direction = Normal(Entity->TargetPos - Entity->Pos);
-    r32 VelFactor = SineousLerp0To0(0, TValue, 200);
-    r32 CurrentVelFactor = Length(Entity->Velocity);
-    if(VelFactor < CurrentVelFactor) {
-        VelFactor = CurrentVelFactor;
-    }
-    Entity->Velocity = VelFactor*Direction;
-    Entity->MoveT += dt;
-    if(Entity->MoveT / Entity->MovePeriod >= 1.0f) {
-        Entity->Pos = Entity->TargetPos;
-        Entity->Velocity = {};
-        Entity->Moving = false;
-    }
-}
-
-inline b32 PushToList(game_state *GameState, s32 X, s32 Y, b32 *VisitedArray, search_cell **SentinelPtr, search_cell **SearchCellFreelistPtr, v2i TargetP) {
-    b32 Found = false;
-    if(X >= 0 && Y >= 0 && X < WORLD_GRID_SIZE && Y < WORLD_GRID_SIZE && !(*(VisitedArray + Y*WORLD_GRID_SIZE + X)) && !GameState->WorldGrid[Y*WORLD_GRID_SIZE + X]) {   
-        
-        *(VisitedArray + Y*WORLD_GRID_SIZE + X) = true;
-        if(X == TargetP.X && Y == TargetP.Y) { 
-            Found = true;
-        } else {  
-            PushOnToList(SentinelPtr, X, Y, &GameState->ScratchPad, SearchCellFreelistPtr); 
-        } 
-    }
-    return Found;
+    return Result;
 }
 
 internal void
 GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
 {
     game_state *GameState = (game_state *)Memory->GameStorage;
-    
+    r32 MetersToPixels = 60.0f;
     if(!GameState->IsInitialized)
     {
         
@@ -171,12 +338,14 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         GameState->PerFrameArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
         
         GameState->ScratchPad = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
+        /////////////////////////////////
         
-        GameState->Player = InitEntity(GameState, V2(100, 100), V2(25, 50), Entity_Player);
+        GameState->RenderConsole = true;
+        GameState->Player = InitEntity(GameState, V2(0, 0), V2(0.5, 1), Entity_Player);
         
         GameState->Camera = InitEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera);
         
-        InitEntity(GameState, V2(200, 200), V2(50, 50), Entity_Object);
+        //InitEntity(GameState, V2(2, 2), V2(1, 1), Entity_Object);
         
         GameState->BackgroundMusic = LoadWavFileDEBUG(Memory, "Moonlight_Hall.wav", &GameState->MemoryArena);
         PushSound(GameState, &GameState->BackgroundMusic, 1.0, true);
@@ -227,18 +396,28 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         GameState->FrameTime = 0;
         GameState->CurrentAnimation = &GameState->LanternManAnimations[0];
         
+        for(u32 Y = 0; Y < 5; ++Y) {
+            for(u32 X = 0; X < 5; ++X) {
+                world_chunk *Result = GetWorldChunk(GameState->Chunks, X, Y, &GameState->MemoryArena);
+                Assert(Result);
+            }
+        }
+        
         GameState->IsInitialized = true;
     }
     
     temp_memory PerFrameMemory = MarkMemory(&GameState->PerFrameArena);
     
-    ClearBitmap(Buffer, V4(1, 1, 0, 1));
+    render_group RenderGroup_ = {};
+    RenderGroup_.MetersToPixels = 60.0f;
+    RenderGroup_.ScreenDim = V2i(Buffer->Width, Buffer->Height);
+    RenderGroup_.Buffer = Buffer;
+    RenderGroup_.TempMem = MarkMemory(&GameState->PerFrameArena);
+    RenderGroup_.Arena = SubMemoryArena(&GameState->PerFrameArena, MegaBytes(1));
     
-    r32 MetersToPixels = 60.0f;
+    render_group *RenderGroup = &RenderGroup_;
     
-    render_group RenderGroup = {};
-    RenderGroup.MetersToPixels = 60.0f;
-    RenderGroup.ScreenDim = V2i(Buffer->Width, Buffer->Height);
+    PushClear(RenderGroup, V4(1, 0.9f, 0.9f, 1));
     
     entity *Player = GameState->Player;
     
@@ -250,14 +429,13 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         } break;
         case PLAY_MODE: {
             v2 CamPos = GameState->Camera->Pos;
-            v2 MouseP = V2(Memory->MouseX, Memory->MouseY);
-            v2 MouseP_CamRel = MouseP + CamPos;
+            v2 MouseP = InverseTransform(RenderGroup, V2(Memory->MouseX, Memory->MouseY));
+            
             if(WasPressed(Memory->GameButtons[Button_Escape]))
             {
                 GameState->GameMode = MENU_MODE;
                 break;
             }
-            
             v2 Acceleration = {};
             r32 AbsAcceleration = 700.0f;
             if(IsDown(Memory->GameButtons[Button_Left]))
@@ -277,14 +455,26 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
             {
                 
             }
+            if(WasPressed(Memory->GameButtons[Button_F1]))
+            {
+                DebugConsole.ViewMode = (DebugConsole.ViewMode == VIEW_MID) ? VIEW_CLOSE : VIEW_MID;
+            }
+            if(WasPressed(Memory->GameButtons[Button_F2]))
+            {
+                DebugConsole.ViewMode = (DebugConsole.ViewMode == VIEW_FULL) ? VIEW_CLOSE : VIEW_FULL;
+            }
             if(WasPressed(Memory->GameButtons[Button_LeftMouse]))
             {
                 if(IsDown(Memory->GameButtons[Button_Shift])) {
-                    s32 CellX = (s32)(MouseP.X / WorldChunkInMeters);
-                    s32 CellY = (s32)(MouseP.Y / WorldChunkInMeters);
+                    s32 CellX = (s32)(floor(MouseP.X / WorldChunkInMeters));
+                    s32 CellY = (s32)(floor(MouseP.Y / WorldChunkInMeters));
                     
-                    u32 Index = CellY*WORLD_GRID_SIZE + CellX;
-                    GameState->WorldGrid[Index] = !GameState->WorldGrid[Index];
+                    
+                    if(!GetWorldChunk(GameState->Chunks, CellX, CellY, 0)) {
+                        world_chunk *Chunk = GetWorldChunk(GameState->Chunks, CellX, CellY, &GameState->MemoryArena);
+                        Assert(Chunk);
+                        // TODO(OLIVER): Maybe make the return type a double ptr so we can assign it straight away.
+                    }
                     
                 } else {
                     entity *NextHotEntity = 0;
@@ -303,10 +493,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                     
                     if(!GameState->InteractingWith) {
                         if(!NextHotEntity) {
-                            v2 TargetP = MouseP + GameState->Camera->Pos;
-                            Player->TargetPos =WorldChunkInMeters*V2i((s32)(TargetP.X / WorldChunkInMeters), (s32)(TargetP.Y / WorldChunkInMeters)); 
-                            Player->OffsetTargetP = TargetP - Player->TargetPos;
-                            Player->StartPos = Player->Pos;
+                            v2 TargetP_r32 = MouseP + GameState->Camera->Pos;
+                            r32 InverseWorldChunkToMeters = 1.0f / WorldChunkInMeters;
+                            
+                            v2i TargetP = ToV2i(InverseWorldChunkToMeters*TargetP_r32); 
+                            
+                            BeginEntityPath(GameState, Player, TargetP);
+                            
+                            Player->OffsetTargetP = TargetP_r32 - WorldChunkInMeters*ToV2(TargetP);
+                            
                             Player->MoveT = 0;
                         } else {
                             GameState->HotEntity = NextHotEntity;
@@ -325,19 +520,43 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                 
             }
             
-            r32 MaxVelocity = 60.0f;
+#if 0
+            s32 StartIndex = (u32)Button_A;
+            s32 EndIndex = (u32)Button_Z;
+            for(s32 KeyIndex = StartIndex; KeyIndex <= EndIndex; ++KeyIndex) {
+                if(IsDown(Memory->GameButtons[KeyIndex])) {
+                    //char Character = GetCharacter(KeyIndex);
+                    if(!IsDown(Memory->GameButtons[Button_Shift])) {
+                        //Character = ToLowerCase(Character);
+                    }
+                    AddToInBuffer("%s", &Character);
+                }
+            }
+#else 
+            for(s32 KeyIndex = 0; KeyIndex <= Memory->SizeOfGameKeys; ++KeyIndex) {
+                
+                game_button *Button = Memory->GameKeys + KeyIndex;
+                if(Button->IsDown) {
+                    AddToInBuffer("%s", &KeyIndex);
+                }
+            }
+#endif
+            
             r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
-            r32 Weights[ANIMATE_QUALITY_COUNT] = {10000.0f, 1.0f};
-            Qualities[POSE] = Player->Velocity.X / MaxVelocity;
+            r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f, 1.0f};
+            Qualities[POSE] = Length(Player->Velocity);
             Qualities[DIRECTION] = atan2(Player->Velocity.Y, Player->Velocity.X); 
-            
+#if 0
             animation *NewAnimation = GetAnimation(GameState->LanternManAnimations, GameState->LanternAnimationCount, Qualities, Weights);
-            
+#else 
+            animation *NewAnimation = &GameState->LanternManAnimations[4];
+#endif
             r32 FastFactor = 1000;
             GameState->FramePeriod = 0.2f; //FastFactor / LengthSqr(Player->Velocity);
             // TODO(OLIVER): Make this into a sineous function
             GameState->FramePeriod = Clamp(0.2f, GameState->FramePeriod, 0.4f);
             
+            Assert(NewAnimation);
             if(NewAnimation != GameState->CurrentAnimation) {
                 GameState->FrameIndex = 0;
                 GameState->CurrentAnimation = NewAnimation;
@@ -351,24 +570,33 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
             UpdateEntityPosViaFunction(GameState->Camera, dt);
 #endif
             
-            for(u32 j = 0; j < ArrayCount(GameState->WorldGrid); ++j) {
+#define DRAW_GRID 1
+            
+#if DRAW_GRID
+            for(u32 j = 0; j < WORLD_CHUNK_HASH_SIZE; ++j) {
                 
-                u32 Y = j / WORLD_GRID_SIZE;
-                u32 X = j - (Y*WORLD_GRID_SIZE);
+                world_chunk *Chunk = GameState->Chunks[j];
                 
-                r32 MinX = X*WorldChunkInMeters;
-                r32 MinY = Y*WorldChunkInMeters;
-                rect2 Rect = Rect2(MinX, MinY, MinX + WorldChunkInMeters,
-                                   MinY + WorldChunkInMeters);
-                
-                v4 Color01 = {0, 0, 0, 1};
-                
-                //DrawRectangle(Buffer, Rect, Color01);
-                if(GameState->WorldGrid[Y*WORLD_GRID_SIZE + X]) {
-                    FillRectangle(Buffer, Rect, V4(0, 0, 0, 1));
+                while(Chunk) {
+                    r32 MinX = Chunk->X*WorldChunkInMeters;
+                    r32 MinY = Chunk->Y*WorldChunkInMeters;
+                    rect2 Rect = Rect2(MinX, MinY, MinX + WorldChunkInMeters,
+                                       MinY + WorldChunkInMeters);
+                    
+                    if(IsPartOfPath(Chunk->X, Chunk->Y, &Player->Path)) {
+                        v4 Color01 = {1, 0, 1, 1};
+                        PushRect(RenderGroup, Rect, Color01);
+                    } else {
+                        v4 Color01 = {0, 0, 0, 1};
+                        PushRectOutline(RenderGroup, Rect, Color01);
+                    }
+                    
+                    
+                    
+                    Chunk = Chunk->Next;
                 }
             }
-            
+#endif
 #define MOVE_VIA_ACCELERATION 0
             
             for(u32 EntityIndex = 0; EntityIndex < GameState->EntityCount; ++EntityIndex)
@@ -386,64 +614,10 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                     {
                         case((u32)Entity_Player):
                         {
-                            // TODO(OLIVER): this check has to be different 
-                            if(Entity->TargetPos != Entity->Pos) { 
-                                
-                                if(!Entity->Moving) {
-                                    search_cell *SearchCellFreelist = 0;
-                                    
-                                    temp_memory TempMem = MarkMemory(&GameState->ScratchPad);
-                                    v2i BestDirection = {};
-                                    v2i StartingP = V2int(Player->TargetPos.X / WorldChunkInMeters, Player->TargetPos.Y / WorldChunkInMeters);
-                                    v2i TargetP = V2int(Player->Pos.X / WorldChunkInMeters, Player->Pos.Y / WorldChunkInMeters);
-                                    
-                                    b32 *VisitedArray = PushArray(&GameState->ScratchPad, b32, ArrayCount(GameState->WorldGrid), true);
-                                    
-                                    search_cell *Sentinel = PushStruct(&GameState->ScratchPad, search_cell);
-                                    
-                                    Sentinel->Next = Sentinel->Prev = Sentinel;
-                                    PushOnToList(&Sentinel, StartingP.X, StartingP.Y,  &GameState->ScratchPad, &SearchCellFreelist);
-                                    *(VisitedArray + StartingP.Y*WORLD_GRID_SIZE + StartingP.X) = true;
-                                    
-                                    s32 AtX = StartingP.X;
-                                    s32 AtY = StartingP.Y;
-                                    b32 Found = false;
-#define PUSH_TO_LIST(X, Y) Found = PushToList(GameState, X, Y, VisitedArray, &Sentinel, &SearchCellFreelist, TargetP); if(Found) break;
-                                    
-                                    while(Sentinel->Prev != Sentinel) {
-                                        search_cell *Cell = Sentinel->Prev;
-                                        AtX = Cell->X;
-                                        AtY = Cell->Y;
-                                        
-                                        PUSH_TO_LIST(AtX + 1, AtY);
-                                        PUSH_TO_LIST(AtX - 1, AtY);
-                                        PUSH_TO_LIST(AtX, AtY + 1);
-                                        PUSH_TO_LIST(AtX, AtY - 1);
-                                        PUSH_TO_LIST(AtX + 1, AtY + 1);
-                                        PUSH_TO_LIST(AtX + 1, AtY - 1);
-                                        PUSH_TO_LIST(AtX - 1, AtY + 1);
-                                        PUSH_TO_LIST(AtX - 1, AtY - 1);
-                                        
-                                        RemoveOffList(&Sentinel, Cell, &SearchCellFreelist);
-                                    }
-                                    
-                                    ReleaseMemory(&TempMem);
-                                    
-                                    Entity->TempTargetPos = V2i(AtX*WorldChunkInMeters, AtY*WorldChunkInMeters);
-                                    Entity->Moving = true;
-                                    Entity->StartPos = Entity->Pos;
-                                    Entity->MovePeriod = 0.5f;
-                                    
-                                    AddToOutBuffer("Temp: [%f: %f]\n", Entity->TempTargetPos.X, Entity->TempTargetPos.Y);
-                                    AddToOutBuffer("Target: [%f: %f]\n", Entity->TargetPos.X, Entity->TargetPos.Y);
-                                } 
-                                
-                                UpdatePieceOfEntityPosViaFunction(Entity, dt);
-                                
-                            }
+                            UpdateEntityPositionViaFunction(GameState, Entity, dt);
                             
 #if 0
-                            v2 CameraWindow = V2(Buffer->Width/3, Buffer->Height/3);
+                            v2 CameraWindow = (1.0f/MetersToPixels)*V2(Buffer->Width/3, Buffer->Height/3);
                             
                             
                             // TODO(OLIVER): WORK ON CAMERA MOVEMENT!!!!!
@@ -457,7 +631,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                             }
 #endif
                             if(GameState->CurrentAnimation) {
-                                
                                 bitmap CurrentBitmap = GameState->CurrentAnimation->Frames[GameState->FrameIndex];
                                 
                                 GameState->FrameTime += dt;
@@ -469,29 +642,34 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                                     }
                                 }
                                 
+                                PushBitmap(RenderGroup, EntityRelP,&CurrentBitmap,  BufferRect);
                                 
-                                DrawBitmap(Buffer, &CurrentBitmap, EntityRelP.X , EntityRelP.Y, BufferRect);
-                                
-                                FillRectangle(Buffer, EntityAsRect, V4(1, 0, 1, 1));
+                                PushRect(RenderGroup, EntityAsRect, V4(1, 0, 1, 1));
                             }
                         } break;
                         case Entity_Object: {
                             
-                            DrawBitmap(Buffer, &GameState->MossBlockBitmap, EntityRelP.X , EntityRelP.Y, BufferRect);
+                            PushBitmap(RenderGroup, EntityRelP,&GameState->MossBlockBitmap,  BufferRect);
                             
-                            FillRectangle(Buffer, EntityAsRect, V4(1, 0, 1, 1));
+                            PushRect(RenderGroup, EntityAsRect, V4(1, 0, 1, 1));
                         } break;
                     }
                 }
             }
             
-            DrawBitmap(Buffer, &GameState->MagicianHandBitmap, MouseP.X, MouseP.Y, BufferRect);
+            PushBitmap(RenderGroup, MouseP,&GameState->MagicianHandBitmap,  BufferRect);
             
-            if(GameState->RenderConsole) {
-                RenderConsole(&DebugConsole); 
-            }
+            
         }
     }
+    
+    
+    RenderGroupToOutput(RenderGroup);
+    
+    if(GameState->RenderConsole) {
+        RenderConsole(&DebugConsole); 
+    }
+    
     ReleaseMemory(&PerFrameMemory);
 }
 
