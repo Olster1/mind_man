@@ -50,6 +50,8 @@ typedef b32 bool32;
 #include "calm_math.h"
 
 #include <float.h>
+#define MAX_U32 0xFFFFFFFF
+#define MAX_S32 2147483647
 
 #define global_variable static
 #define internal static

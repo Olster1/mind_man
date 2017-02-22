@@ -171,8 +171,6 @@ struct game_state
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;
     
-    //b32 WorldGrid[WORLD_GRID_SIZE*WORLD_GRID_SIZE];
-    
     entity *Camera;
     
     loaded_sound BackgroundMusic;

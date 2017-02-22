@@ -128,13 +128,13 @@ inline void RemoveOffList(search_cell **SentinelPtr, search_cell *CellToRemove, 
     
 }
 
-inline b32 PushToList(game_state *GameState, s32 X, s32 Y, s32 CameFromX, s32 CameFromY,  world_chunk **VisitedHash, search_cell **SentinelPtr, search_cell **FreeListPtr, v2i TargetP, 
+inline b32 PushToList(world_chunk **WorldChunks, s32 X, s32 Y, s32 CameFromX, s32 CameFromY,  world_chunk **VisitedHash, search_cell **SentinelPtr, search_cell **FreeListPtr, v2i TargetP, 
                       memory_arena *TempArena, search_type SearchType) {
     b32 Found = false;
     
     switch(SearchType) {
         case SEARCH_VALID_SQUARES: {
-            if(GetWorldChunk(GameState->Chunks, X, Y, 0) && !GetWorldChunk(VisitedHash, X, Y, 0)) {   
+            if(GetWorldChunk(WorldChunks, X, Y, 0) && !GetWorldChunk(VisitedHash, X, Y, 0)) {   
                 
                 GetWorldChunk(VisitedHash, X, Y, TempArena);
                 if(X == TargetP.X && Y == TargetP.Y) { 
@@ -146,7 +146,7 @@ inline b32 PushToList(game_state *GameState, s32 X, s32 Y, s32 CameFromX, s32 Ca
         case SEARCH_INVALID_SQUARES: {
             if(!GetWorldChunk(VisitedHash, X, Y, 0)) {   
                 GetWorldChunk(VisitedHash, X, Y, TempArena);
-                if(GetWorldChunk(GameState->Chunks, X, Y, 0)) {
+                if(GetWorldChunk(WorldChunks, X, Y, 0)) {
                     Found = true;
                 }  
                 PushOnToList(SentinelPtr, X, Y, CameFromX, CameFromY, TempArena, FreeListPtr); 
@@ -172,7 +172,7 @@ struct search_info {
     b32 Initialized;
 };
 
-inline void InitSearchInfo(search_info *Info, v2i StartP,  game_state *GameState, memory_arena *TempArena) {
+inline void InitSearchInfo(search_info *Info,  game_state *GameState, memory_arena *TempArena) {
     Info->SearchCellList = 0;
     Info->VisitedHash = PushArray(TempArena, world_chunk *, ArrayCount(GameState->Chunks), true);
     
@@ -185,16 +185,16 @@ inline void InitSearchInfo(search_info *Info, v2i StartP,  game_state *GameState
     Info->Initialized = true;
 }
 
-internal search_cell *CalculatePath(game_state *GameState, v2i StartP, v2i EndP,
+internal search_cell *CalculatePath(game_state *GameState, world_chunk **WorldChunks, v2i StartP, v2i EndP,
                                     memory_arena *TempArena, search_type SearchType, search_info *Info) {
     
     s32 AtX = StartP.X;
     s32 AtY = StartP.Y;
     
-#define PUSH_TO_LIST(X, Y) if(!Info->Found) {Info->Found = PushToList(GameState, X, Y, AtX, AtY, Info->VisitedHash, &Info->Sentinel, &GameState->SearchCellFreeList, EndP, TempArena, SearchType); }
+#define PUSH_TO_LIST(X, Y) if(!Info->Found) {Info->Found = PushToList(WorldChunks, X, Y, AtX, AtY, Info->VisitedHash, &Info->Sentinel, &GameState->SearchCellFreeList, EndP, TempArena, SearchType); }
     
     if(!Info->Initialized) {
-        InitSearchInfo(Info, StartP, GameState, TempArena);
+        InitSearchInfo(Info, GameState, TempArena);
         PUSH_TO_LIST(AtX, AtY);
     }
     
@@ -217,10 +217,14 @@ internal search_cell *CalculatePath(game_state *GameState, v2i StartP, v2i EndP,
         RemoveOffList(&Info->Sentinel, Cell, &Info->SearchCellList);
     }
     
-    RemoveOffList(&Info->Sentinel, Info->Sentinel->Next, &Info->SearchCellList);
+    if(Info->Found) {
+        RemoveOffList(&Info->Sentinel, Info->Sentinel->Next, &Info->SearchCellList);
+    }
+    
     
     return Info->SearchCellList;
 }
+
 
 internal void RetrievePath(game_state *GameState, v2i StartP, v2i EndP, path_nodes *Path) {
     
@@ -229,7 +233,7 @@ internal void RetrievePath(game_state *GameState, v2i StartP, v2i EndP, path_nod
     temp_memory TempMem = MarkMemory(TempArena);
     search_info SearchInfo = {};
     
-    search_cell *SearchCellList = CalculatePath(GameState, StartP, EndP, TempArena,  SEARCH_VALID_SQUARES, &SearchInfo);
+    search_cell *SearchCellList = CalculatePath(GameState, GameState->Chunks, StartP, EndP, TempArena,  SEARCH_VALID_SQUARES, &SearchInfo);
     
     Assert(SearchInfo.Found);
     
@@ -259,18 +263,28 @@ internal void RetrievePath(game_state *GameState, v2i StartP, v2i EndP, path_nod
     ReleaseMemory(&TempMem);
 }
 
+/*NOTE(Ollie): This takes works by first flood filling the island
+the player is situated on using the visited hash and setting the targetPos to somwhere impossible (a very big number). This gives us all 
+valid positions the player could move to. We then find the closest 
+valid cell to where the player clicked, only searching the hash of
+valid cells returned to us by the last funciton. 
+*/
 internal v2i GetClosestPosition(game_state *GameState, v2i TargetP, v2i StartP) {
     
     v2i Result = {};
     memory_arena *TempArena = &GameState->ScratchPad;
     temp_memory TempMem = MarkMemory(TempArena);
     
-    search_info SearchInfo = {};
-    //STAGE 2: islands;
-    search_cell *SearchCellList = CalculatePath(GameState, TargetP, StartP, TempArena,  SEARCH_INVALID_SQUARES, &SearchInfo);
+    search_info FirstStageSearchInfo = {};
+    CalculatePath(GameState, GameState->Chunks, StartP, V2int(MAX_S32, MAX_S32), TempArena,  SEARCH_VALID_SQUARES, &FirstStageSearchInfo);
     
+    Assert(!FirstStageSearchInfo.Found);
+    
+    search_info SecondStageSearchInfo = {};
+    
+    search_cell *SearchCellList = CalculatePath(GameState, FirstStageSearchInfo.VisitedHash, TargetP, StartP, TempArena,  SEARCH_INVALID_SQUARES, &SecondStageSearchInfo);
     search_cell *Cell = SearchCellList;
-    Assert(SearchInfo.Found);
+    Assert(SecondStageSearchInfo.Found);
     
     Assert(GetWorldChunk(GameState->Chunks, Cell->Pos.X, Cell->Pos.Y, 0));
     
