@@ -158,6 +158,16 @@ GetFontGlyphBitmap(font *Font, char UnicodePoint)
     return Result;
 }
 
+internal s32 GetGlyphWidth(font *Font, char UnicodePoint) {
+    bitmap *GlyphBitmap = GetFontGlyphBitmap(Font, UnicodePoint);
+    s32 Result = 0;
+    if(GlyphBitmap) {
+        Result = GlyphBitmap->Width;
+    } 
+    
+    return Result;
+}
+
 internal s32 
 GetCharacterAdvanceFor(font *Font, char LastCodePoint, char ThisCodePoint)
 {

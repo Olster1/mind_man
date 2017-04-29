@@ -560,6 +560,31 @@ Hadamard(v4 A, v4 B)
     v4 Result = V4(A.X*B.X, A.Y*B.Y, A.Z*B.Z, A.W*B.W);
     return Result;
 }
+
+inline v4 
+SineousLerp0To1(v4 A, r32 tValue, v4 B) {
+    
+    r32 X = SineousLerp0To1(A.R, tValue, B.R);
+    r32 Y = SineousLerp0To1(A.G, tValue, B.G);
+    r32 Z = SineousLerp0To1(A.B, tValue, B.B);
+    r32 W = SineousLerp0To1(A.A, tValue, B.A);
+    v4 Result = V4(X, Y, Z, W); 
+    return Result;
+    
+}
+
+inline v4 
+SineousLerp0To0(v4 A, r32 tValue, v4 B) {
+    
+    r32 X = SineousLerp0To0(A.R, tValue, B.R);
+    r32 Y = SineousLerp0To0(A.G, tValue, B.G);
+    r32 Z = SineousLerp0To0(A.B, tValue, B.B);
+    r32 W = SineousLerp0To0(A.A, tValue, B.A);
+    v4 Result = V4(X, Y, Z, W); 
+    return Result;
+    
+}
+
 //NOTE(Oliver): rect2 operations
 
 struct rect2

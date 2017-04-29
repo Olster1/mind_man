@@ -22,7 +22,7 @@ struct search_cell {
 };
 
 struct path_nodes {
-    v2i Points[512];
+    v2 Points[512];
     u32 Count;
 };
 
@@ -36,7 +36,8 @@ struct entity
     
     u32 VectorIndexAt;
     
-    v2 OffsetTargetP;
+    v2 NewOffsetTargetP;
+    v2 OldOffsetTargetP;
     
     r32 MoveT;
     r32 MovePeriod;

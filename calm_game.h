@@ -61,6 +61,22 @@ MemoryCopy(void *Source, void *Dest, u32 Size)
     }
 }
 
+inline s32
+MemoryCopy(void *NullTerminatedSource, void *Dest)
+{
+    u8 *NullTerminatedSource_u8 = (u8 *)NullTerminatedSource;
+    u8 *Dest_u8 = (u8 *)Dest;
+    
+    s32 BytesWritten = 0;
+    while(*NullTerminatedSource_u8)
+    {
+        *Dest_u8++ = *NullTerminatedSource_u8++;
+        BytesWritten++;
+    }
+    
+    return BytesWritten;
+}
+
 
 inline void InitializeMemoryArena(memory_arena *Arena, void *Memory, size_t Size) {
     Arena->Base = (u8 *)Memory;
@@ -95,6 +111,28 @@ DoStringsMatch(char *A, char *B)
     
     return Result;
 }
+inline b32 DoStringsMatch(char *NullTerminatedA, char *B, u32 LengthOfB) {
+    b32 Result = true;
+    while(*NullTerminatedA && LengthOfB > 0) {
+        Result &= (*NullTerminatedA++ == *B++);
+        LengthOfB--;
+    }
+    Result &= (LengthOfB == 0) && (!*NullTerminatedA);
+    
+    return Result;
+}
+
+
+internal u32 StringLength(char *A) {
+    u32 Result = 0;
+    
+    while (*A++)
+    {
+        Result++;
+    }
+    
+    return Result;
+}
 
 inline temp_memory
 MarkMemory(memory_arena *Arena)
@@ -118,6 +156,18 @@ ReleaseMemory(temp_memory *TempMem)
 }
 
 #define MoveToList(LinkPtr, FreeList, type) type *Next = (*LinkPtr)->Next; (*LinkPtr)->Next = FreeList; FreeList = *LinkPtr; *LinkPtr = Next;
+
+struct timer {
+    r32 Value;
+    r32 Period;
+};
+
+inline void UpdateTimer(timer *Timer, r32 dt) {
+    Timer->Value += dt;
+    if((Timer->Value / Timer->Period) > 1.0f) {
+        Timer->Value = 0.0f;
+    }
+}
 
 #include "calm_bucket.cpp"
 #include "calm_math.h"
@@ -150,7 +200,7 @@ struct animation {
     r32 Qualities[ANIMATE_QUALITY_COUNT];
 };
 
-static r32 WorldChunkInMeters = 0.7f;
+static r32 WorldChunkInMeters = 0.1f;
 
 struct world_chunk {
     s32 X;

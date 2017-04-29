@@ -66,7 +66,14 @@ Win32GetClientDimension(HWND WindowHandle)
     return Result;
 }
 
-global_variable game_button GameKeys[256];
+inline void UpdateButton(game_button *Button, b32 IsUp, b32 WasDown) {
+    Button->IsDown = !IsUp;
+    if(WasDown == IsUp) {
+        Button->FrameCount++;
+    }
+} 
+
+global_variable game_button GameKeys[256 + 4]; // + four extra places for keyup, down, left, right etc.
 
 LRESULT CALLBACK
 Win32MainWindowCallBack(
@@ -98,10 +105,7 @@ LPARAM lParam)
             b32 WasDown = lParam & (1 << 30);
             
             game_button *Button = GameKeys + wParam;
-            Button->IsDown = !IsUp;
-            if(WasDown == IsUp) {
-                Button->FrameCount++;
-            }
+            UpdateButton(Button, IsUp, WasDown);
             
         } break;
         case WM_SIZE:
@@ -709,6 +713,11 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 GetButtonState(GameMemory.GameButtons + Button_Down, VK_DOWN, 0x53);
                 GetButtonState(GameMemory.GameButtons + Button_Left, VK_LEFT, 0x41);
                 GetButtonState(GameMemory.GameButtons + Button_Right, VK_RIGHT, 0x44);
+                //////////////////
+                // TODO(OLIVER): Replace this using the asci array in order to get the nice lag time on key press
+                GetButtonState(GameMemory.GameButtons + Button_Arrow_Left, VK_LEFT);
+                GetButtonState(GameMemory.GameButtons + Button_Arrow_Right, VK_RIGHT);
+                ////////////////
                 GetButtonState(GameMemory.GameButtons + Button_Space, VK_SPACE);
                 GetButtonState(GameMemory.GameButtons + Button_Escape, VK_ESCAPE);
                 GetButtonState(GameMemory.GameButtons + Button_Enter, VK_RETURN);

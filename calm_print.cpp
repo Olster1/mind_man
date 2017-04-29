@@ -106,6 +106,17 @@
  
 #define Print(Array, ...) Print_(Array, sizeof(Array), ##__VA_ARGS__);
  
+ inline char *PrintString(char *TextBuffer, u32 TextBufferSize, char *String) {
+     u32 StringLength = 0;
+     while(*String) {
+         Assert(TextBufferSize > StringLength);
+         *TextBuffer++ = *String++;
+         StringLength++;
+     }
+     
+     return TextBuffer;
+ }
+ 
  internal s32
      Print__(char *TextBuffer, u32 TextBufferSize, char *FormatString, u8 *Arguments, b32 NullTerminate = true)
  {
@@ -133,6 +144,15 @@
                      while(*Argument)
                      {
                          *TextBufferAt++ = *Argument++;
+                     }
+                 } break;
+                 case 'b':
+                 {
+                     s32 Argument = NextArgument(Arguments, b32); 
+                     if(Argument) {
+                         TextBufferAt = PrintString(TextBufferAt, SizeRemaining, "true");
+                     } else {
+                         TextBufferAt = PrintString(TextBufferAt, SizeRemaining, "false");
                      }
                  } break;
                  case 'd':
