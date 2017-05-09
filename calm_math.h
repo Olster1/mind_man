@@ -152,6 +152,17 @@ V3(r32 X, r32 Y, r32 Z)
     return Result;
 }
 
+inline v3
+V3(v2 XY, r32 Z)
+{
+    v3 Result;
+    Result.X = XY.X;
+    Result.Y = XY.Y;
+    Result.Z = Z;
+    
+    return Result;
+}
+
 inline v4
 V4(r32 X, r32 Y, r32 Z, r32 W)
 {
@@ -210,6 +221,19 @@ Lerp(r32 A, r32 t, r32 B)
 
 inline r32 SineousLerp0To1(r32 A, r32 t, r32 B) {
     r32 TransformedT = sin(t*PI32/2);
+    r32 Result = Lerp(A, TransformedT, B);
+    return Result;
+}
+
+inline r32 ExponentialUpLerp0To1(r32 A, r32 t, r32 B) {
+    r32 TransformedT = sin(t*PI32/4);
+    r32 Result = Lerp(A, TransformedT, B);
+    return Result;
+}
+
+inline r32 ExponentialDownLerp0To1(r32 A, r32 t, r32 B) {
+    r32 TransformedT = sin((t*PI32/4) - PI32/4);
+    Assert(TransformedT >= 0 && TransformedT <= 1.0);
     r32 Result = Lerp(A, TransformedT, B);
     return Result;
 }
@@ -346,6 +370,17 @@ operator *(u32 Scalar, v2i A)
     return Result;
 }
 
+
+inline v2
+operator -(v2 A, v2i B)
+{
+    v2 Result;
+    Result.X = A.X - (r32)B.X;
+    Result.Y = A.Y - (r32)B.Y;
+    return Result;
+}
+
+
 inline v2
 operator /(v2 A, v2 B)
 {
@@ -381,6 +416,26 @@ inline v2 SineousLerp0To0(v2 A, r32 t, v2 B) {
     r32 TransformedT = sin(t*PI32);
     v2 Result = Lerp(A, TransformedT, B);
     return Result;
+}
+
+inline v2
+ExponentialUpLerp0To1(v2 A, r32 tValue, v2 B) {
+    
+    r32 X = ExponentialUpLerp0To1(A.X, tValue, B.X);
+    r32 Y = ExponentialUpLerp0To1(A.Y, tValue, B.Y);
+    v2 Result = V2(X, Y); 
+    return Result;
+    
+}
+
+inline v2
+ExponentialDownLerp0To1(v2 A, r32 tValue, v2 B) {
+    
+    r32 X = ExponentialDownLerp0To1(A.X, tValue, B.X);
+    r32 Y = ExponentialDownLerp0To1(A.Y, tValue, B.Y);
+    v2 Result = V2(X, Y); 
+    return Result;
+    
 }
 
 inline b32
@@ -450,6 +505,13 @@ inline v2i
 ToV2i(v2 In)
 {
     v2i Result = V2int((s32)In.X, (s32)In.Y);
+    return Result;
+}
+
+inline v2i
+ToV2i_floor(v2 In)
+{
+    v2i Result = V2int(FloorRealToInt32(In.X), FloorRealToInt32(In.Y));
     return Result;
 }
 
@@ -585,6 +647,30 @@ SineousLerp0To0(v4 A, r32 tValue, v4 B) {
     
 }
 
+inline v4 
+ExponentialUpLerp0To1(v4 A, r32 tValue, v4 B) {
+    
+    r32 X = ExponentialUpLerp0To1(A.R, tValue, B.R);
+    r32 Y = ExponentialUpLerp0To1(A.G, tValue, B.G);
+    r32 Z = ExponentialUpLerp0To1(A.B, tValue, B.B);
+    r32 W = ExponentialUpLerp0To1(A.A, tValue, B.A);
+    v4 Result = V4(X, Y, Z, W); 
+    return Result;
+    
+}
+
+inline v4 
+ExponentialDownLerp0To1(v4 A, r32 tValue, v4 B) {
+    
+    r32 X = ExponentialDownLerp0To1(A.R, tValue, B.R);
+    r32 Y = ExponentialDownLerp0To1(A.G, tValue, B.G);
+    r32 Z = ExponentialDownLerp0To1(A.B, tValue, B.B);
+    r32 W = ExponentialDownLerp0To1(A.A, tValue, B.A);
+    v4 Result = V4(X, Y, Z, W); 
+    return Result;
+    
+}
+
 //NOTE(Oliver): rect2 operations
 
 struct rect2
@@ -629,6 +715,24 @@ Rect2MinMax(v2 Min, v2 Max)
 }
 
 inline rect2
+Rect2MinMaxWithCheck(v2 Min, v2 Max) {
+    rect2 Result = {};
+    Result.Min = Min;
+    Result.Max = Max;
+    
+    if(Min.X > Max.X) {
+        Result.Min.X = Max.X;
+        Result.Max.X = Min.X;
+    }
+    if(Min.Y > Max.Y) {
+        Result.Min.Y = Max.Y;
+        Result.Max.Y = Min.Y;
+    }
+    
+    return Result;    
+}
+
+inline rect2
 Rect2CenterDim(v2 Center, v2 Dim)
 {
     rect2 Result = {};
@@ -639,6 +743,19 @@ Rect2CenterDim(v2 Center, v2 Dim)
     Result.Min.Y = Center.Y - HalfDim.Y,
     Result.Max.X = Center.X + HalfDim.X,
     Result.Max.Y = Center.Y + HalfDim.Y;
+    
+    return Result;
+}
+
+inline rect2
+Rect2MinDim(v2 Corner, v2 Dim)
+{
+    rect2 Result = {};
+    
+    Result.Min.X = Corner.X;
+    Result.Min.Y = Corner.Y;
+    Result.Max.X = Corner.X + Dim.X,
+    Result.Max.Y = Corner.Y + Dim.Y;
     
     return Result;
 }
@@ -663,7 +780,16 @@ GetMaxCorner(rect2 Rect)
     v2 Result = Rect.Max;
     return Result;
 }
-
+inline b32
+InBounds(rect2 Rect, s32 X, s32 Y)
+{
+    v2 Point = V2(X, Y);
+    b32 Result = (Point.X >= Rect.Min.X &&
+                  Point.Y >= Rect.Min.Y &&
+                  Point.X < Rect.Max.X &&
+                  Point.Y < Rect.Max.Y);
+    return Result;
+}
 inline b32
 InBounds(rect2 Rect, v2 Point)
 {

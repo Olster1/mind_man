@@ -17,6 +17,8 @@ enum font_quality
 {
     FontQuality_Debug,
     FontQuality_Size,
+    
+    //
     FontQuality_Count
 };
 
@@ -46,6 +48,19 @@ struct font_header
 };
 #pragma pack(pop)
 
+enum quality_type {
+    Font_Quality_Real32,
+    Font_Quality_String, 
+};
+
+struct font_quality_value  {
+    quality_type Type;
+    union {
+        r32 Value;
+        char Name[256];
+    };
+};
+
 struct font
 {
     char *Name;
@@ -57,12 +72,23 @@ struct font
     font_glyph *Glyphs[128];
     u32 UnicodeToIndex[1028];
     u32 LineAdvance;
-    r32 *Qualities;
+    font_quality_value *Qualities;
     
     font *Next;
 };
 
-inline u32 GetLineAdvance(font *Font)
+inline font_quality_value InitFontQualityValue(r32 Value) { 
+    return {Font_Quality_Real32, Value}; 
+}
+
+inline font_quality_value InitFontQualityValue(char *Value) { 
+    font_quality_value Result = {};
+    Result.Type = Font_Quality_String;
+    CopyStringToBuffer(Result.Name, ArrayCount(Result.Name), Value);
+    return Result; 
+}
+
+inline u32 GetLineAdvance_(font *Font)
 {
     u32 Result = Font->LineAdvance;
     return Result;
@@ -105,7 +131,7 @@ LoadFontFile(char *FileName, game_memory *Memory, memory_arena *Arena)
             ResultFont->SpacingNum = FontHeader->RowCount;
             ResultFont->SpacingTable = (s32 *)(FontHeader_u8 + FontHeader->SpacingAt);
             ResultFont->LineAdvance = FontHeader->LineAdvance;
-            ResultFont->Qualities = (r32 *)(FontHeader_u8 + FontHeader->QualitiesOffset);
+            ResultFont->Qualities = (font_quality_value *)(FontHeader_u8 + FontHeader->QualitiesOffset);
             
             ResultFont->GlyphCount++; //NOTE(oliver): For null glyph 
             
@@ -179,13 +205,21 @@ GetCharacterAdvanceFor(font *Font, char LastCodePoint, char ThisCodePoint)
     return Result;
 }
 
-inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, s32 *XCursor, s32 *YCursor, u32 BufferWidth, r32 LineAdvanceModifier, b32 NewLineSensitive) {
+internal r32 GetLineAdvance(font *Font, r32 Scale, r32 LineAdvanceModifier) {
+    r32 Result = Scale*LineAdvanceModifier*GetLineAdvance_(Font);
+    return Result;
+}
+
+inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, r32 *XCursor, r32 *YCursor, rect2 Bounds, r32 LineAdvanceModifier, b32 NewLineSensitive, transform *Transform) {
+    // NOTE(OLIVER): This is to take into account different transforms i.e. rendering ortho and perspective. 
+    // TODO(OLIVER): Do we want to handle transforms in a more uniform way 
+    v2 Scale = V2(1.0f / Transform->Scale.X, 1.0f / Transform->Scale.Y);
     
-    s32 XAdvanceForLetter = GetCharacterAdvanceFor(Font, LastCodePoint, CheesePoint);
-    if((XAdvanceForLetter + *XCursor) > (s32)BufferWidth || CheesePoint == '\n' && NewLineSensitive)
+    r32 XAdvanceForLetter = Scale.X*GetCharacterAdvanceFor(Font, LastCodePoint, CheesePoint);
+    if((XAdvanceForLetter + *XCursor) > Bounds.Max.X || (CheesePoint == '\n' && NewLineSensitive))
     {
-        *XCursor = 0;
-        *YCursor += LineAdvanceModifier*GetLineAdvance(Font);
+        *XCursor = Bounds.Min.X;
+        *YCursor += GetLineAdvance(Font, Scale.Y, LineAdvanceModifier);
     }
     else
     {
@@ -196,28 +230,51 @@ inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, s32 
 
 internal void DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrigin_, rect2 Bounds, v4 Color);
 
+struct draw_text_options {
+    b32 DisplayText; 
+    r32 LineAdvanceModifier;
+    u32 OptionalLetterCount;
+    b32 NewLineSensitive;
+    r32 ZDepth;
+    b32 AdvanceYAtStart;
+};
+
+inline draw_text_options InitDrawOptions() {
+    draw_text_options Result = {};
+    Result.DisplayText = true; 
+    Result.LineAdvanceModifier = -1;
+    Result.OptionalLetterCount = INT_MAX;
+    Result.NewLineSensitive = true;
+    Result.ZDepth = 0.0f;
+    Result.AdvanceYAtStart = false;
+    return Result;
+}
 
 // TODO(OLIVER): Compress this into a more reusable component i.e. text metrics and draw text.
 internal v2i
-TextToOutput(bitmap *Buffer, font *Font, char *String, s32 XCursor, s32 YCursor, rect2 Bounds, v4 Color, b32 DrawText = true, r32 LineAdvanceModifier = -1,  u32 OptionalLetterCount = INT_MAX, b32 NewLineSensitive = true) {
-    //NOTE(OLIVER): We had this so we can move upwards when writing text
+TextToOutput(render_group *Group, font *Font, char *String, r32 XCursor, r32 YCursor, rect2 Bounds, v4 Color, draw_text_options *Options) {
     char LastCodePoint = 0;
+    
+    if(Options->AdvanceYAtStart) {
+        // NOTE(OLIVER): Remember the line advance is normally -1 for text being written downwards. So we add the line advance to move downwards. 
+        YCursor += GetLineAdvance(Font, 1.0f/Group->Transform.Scale.Y, Options->LineAdvanceModifier);
+    }
     
     u32 Count = 0;
     for(char *Letter = String;
-        *Letter && Count < OptionalLetterCount;
+        *Letter && Count < Options->OptionalLetterCount;
         Letter++, Count++)
     {
         char CheesePoint = *Letter; // TODO(OLIVER): Handle UTF-8 strings!
         
-        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier, NewLineSensitive);
-        if(DrawText) {
-            DrawBitmap(Buffer, GetFontGlyphBitmap(Font, CheesePoint), XCursor, YCursor, Bounds, Color);
+        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform);
+        if(Options->DisplayText) {
+            PushBitmap(Group, V3(XCursor, YCursor, Options->ZDepth), GetFontGlyphBitmap(Font, CheesePoint), Transform(&Group->Transform, Bounds), Color);
         }
         LastCodePoint = CheesePoint;                
     }
     
-    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Buffer->Width, LineAdvanceModifier, NewLineSensitive);
+    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform);
     
     v2i CursorP = V2int(XCursor, YCursor);
     return  CursorP;
@@ -252,31 +309,86 @@ GetTextBounds(font *Font, char *String)
 }
 
 //NOTE(): The qualities at the moment are between 0-1.0. Maybe the could be more 
-//descriptive in the future. 9/2/2017
+//descriptive in the future. 9/2/2017 
+//Added quality types but not currently using them.
+
+struct find_font_result {
+    font *Font;
+    r32 BestMatch;
+};
+
+inline void InnerFindFont(font *Font, font_quality_value *Qualities, find_font_result *Res) {
+    r32 SqrDifferenceTotal = 0;
+    for(u32 QualityIndex = 0;
+        QualityIndex < FontQuality_Count;
+        ++QualityIndex)
+    {
+        switch(Qualities[QualityIndex].Type) {
+            case Font_Quality_Real32: {
+                SqrDifferenceTotal += Sqr(Abs(Qualities[QualityIndex].Value - Font->Qualities[QualityIndex].Value));
+            } break;
+            case Font_Quality_String: {
+                //Do we need these extra cases now?
+            } break;
+        }
+    }
+    
+    if(Res->BestMatch > SqrDifferenceTotal)
+    {
+        Res->Font = Font;
+        Res->BestMatch = SqrDifferenceTotal;
+    }
+} 
+
 internal font *
-FindFont(font *Fonts, r32 *Qualities)
+FindFont(font *Fonts, font_quality_value *Qualities) {
+    find_font_result Result = {};
+    Result.BestMatch = 1000000.0f;
+    
+    for(font *Font = Fonts; Font; Font = Font->Next) {
+        InnerFindFont(Font, Qualities, &Result);
+    }
+    return Result.Font;
+}
+
+internal font *
+FindFont_(font **Fonts, font_quality_value *Qualities, u32 FontCount) {
+    find_font_result Result = {};
+    Result.BestMatch = 1000000.0f;
+    
+    forN_(FontCount, i) {
+        InnerFindFont(Fonts[i], Qualities, &Result);
+    }
+    return Result.Font;
+}
+
+internal font *
+FindFontByName(font *Fonts, char *FontName, font_quality_value *Qualities = 0)
 {
     font *Result = 0;
-    r32 BestMatch = 1000000.0f;
     
+    u32 FontCount = 0;
+    font *FontPtrs[64] = {};
+    
+    font *LastFont = 0;
     for(font *Font = Fonts;
         Font;
         Font = Font->Next)
     {
-        r32 SqrDifferenceTotal = 0;
-        for(u32 QualityIndex = 0;
-            QualityIndex < FontQuality_Count;
-            ++QualityIndex)
-        {
-            SqrDifferenceTotal += Sqr(Abs(Qualities[QualityIndex] - Font->Qualities[QualityIndex]));
-        }
-        
-        if(BestMatch > SqrDifferenceTotal)
-        {
-            Result = Font;
-            BestMatch = SqrDifferenceTotal;
+        if(DoStringsMatch(FontName, Font->Name)){
+            Assert(FontCount < ArrayCount(FontPtrs));
+            FontPtrs[FontCount++] = Font;
         }
     }
+    
+    if(Qualities) {
+        Result = FindFont_(FontPtrs, Qualities, FontCount);
+    } else if(FontCount){
+        Result = FontPtrs[0];
+    }
+    
+    Assert(Result);
+    
     return Result;
 }
 

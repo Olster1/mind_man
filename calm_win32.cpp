@@ -13,6 +13,8 @@
 #include "write_font_file_win32.h"
 #include "dsound.h"
 
+#define WRITE_FONT_FILE 1
+
 global_variable b32 GlobalRunning;
 
 global_variable offscreen_buffer GlobalOffscreenBuffer;
@@ -672,8 +674,9 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             GameMemory.GameRunningPtr = &GlobalRunning;
             GameMemory.SoundOn = false;
             
+#if WRITE_FONT_FILE
             Win32WriteFontFile();
-            
+#endif
             s64 LastCounter = Win32GetTimeCount();
             
             

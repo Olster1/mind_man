@@ -393,7 +393,7 @@ UpdateEntityPositionWithImpulse(game_state *GameState, entity *Entity, r32 dt, v
 }
 
 inline entity *
-InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type)
+InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsInteractable = false)
 {
     Assert(GameState->EntityCount < ArrayCount(GameState->Entities));
     
@@ -411,6 +411,8 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type)
     Entity->Rotation = Mat2();
     Entity->FacingDirection = 1;
     Entity->Type = Type;
+    Entity->IsInteractable = IsInteractable;
+    Entity->TriggerAction = false;
     
     return Entity;
 }

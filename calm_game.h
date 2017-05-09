@@ -7,6 +7,9 @@
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
 
+#define END_WITH_OFFSET 0
+#define MOVE_DIAGONAL 0
+
 struct memory_arena
 {
     void *Base;
@@ -48,35 +51,6 @@ PushSize(memory_arena *Arena, size_t Size, b32 Clear = true)
     
 }
 
-inline void
-MemoryCopy(void *Source, void *Dest, u32 Size)
-{
-    u8 *Source_u8 = (u8 *)Source;
-    u8 *Dest_u8 = (u8 *)Dest;
-    
-    while(Size--)
-    {
-        *Dest_u8++ = *Source_u8++;
-        
-    }
-}
-
-inline s32
-MemoryCopy(void *NullTerminatedSource, void *Dest)
-{
-    u8 *NullTerminatedSource_u8 = (u8 *)NullTerminatedSource;
-    u8 *Dest_u8 = (u8 *)Dest;
-    
-    s32 BytesWritten = 0;
-    while(*NullTerminatedSource_u8)
-    {
-        *Dest_u8++ = *NullTerminatedSource_u8++;
-        BytesWritten++;
-    }
-    
-    return BytesWritten;
-}
-
 
 inline void InitializeMemoryArena(memory_arena *Arena, void *Memory, size_t Size) {
     Arena->Base = (u8 *)Memory;
@@ -96,7 +70,6 @@ inline memory_arena SubMemoryArena(memory_arena *Arena, size_t Size) {
 
 
 #define CopyArray(Source, Dest, Type, Count) MemoryCopy(Source, Dest, sizeof(Type)*Count);
-
 
 inline b32
 DoStringsMatch(char *A, char *B)
@@ -162,21 +135,23 @@ struct timer {
     r32 Period;
 };
 
-inline void UpdateTimer(timer *Timer, r32 dt) {
+inline void UpdateTimer(timer *Timer, r32 dt, r32 ResetValue = 0.0f) {
     Timer->Value += dt;
-    if((Timer->Value / Timer->Period) > 1.0f) {
-        Timer->Value = 0.0f;
+    if((Timer->Value / Timer->Period) >= 1.0f) {
+        Timer->Value = ResetValue;
     }
+    Assert((Timer->Value/Timer->Period) <= 1.0f);
 }
 
 #include "calm_bucket.cpp"
 #include "calm_math.h"
 #include "calm_random.h"
+#include "calm_render.h"
 #include "calm_font.h"
 #include "calm_console.h"
 #include "calm_sound.h"
 #include "calm_entity.h"
-#include "calm_render.h"
+
 
 enum game_mode {
     PLAY_MODE,
@@ -200,11 +175,23 @@ struct animation {
     r32 Qualities[ANIMATE_QUALITY_COUNT];
 };
 
-static r32 WorldChunkInMeters = 0.1f;
+enum chunk_type {
+    chunk_null,
+    
+    chunk_grass,
+    chunk_fire,
+    chunk_water,
+    
+    chunk_type_count
+};
+
+static r32 WorldChunkInMeters = 1.0f;
 
 struct world_chunk {
     s32 X;
     s32 Y;
+    
+    chunk_type Type;
     
     world_chunk *Next;
 };
@@ -230,7 +217,9 @@ struct game_state
     
     entity *Player;
     
+    //TODO: Can we get rid of this using z-indexes!
     b32 RenderConsole;
+    //
     
     game_mode GameMode;
     s32 MenuIndex;
@@ -245,7 +234,8 @@ struct game_state
     entity Entities[64];
     
     font *Fonts;
-    font *Font;
+    font *GameFont;
+    font *DebugFont;
     bitmap MossBlockBitmap;
     bitmap MagicianHandBitmap;
     

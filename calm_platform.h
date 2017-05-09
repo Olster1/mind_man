@@ -6,10 +6,16 @@
    $Creator: Oliver Marsh $
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
+/*
+// TODO(OLIVER): 
 
+  Fix offset on tile moves
+  
+  Takes pictures of grant's castles and put in game
+  
+  Parse strings as words when drawing them
+*/
 #include <stdint.h>
-
-
 
 //NOTE(oliver): Define types
 
@@ -47,8 +53,6 @@ typedef b32 bool32;
 
 #include "calm_intrinsics.h"
 
-#include "calm_math.h"
-
 #include <float.h>
 #define MAX_U32 0xFFFFFFFF
 #define MAX_S32 2147483647
@@ -81,6 +85,8 @@ typedef b32 bool32;
 #endif
 
 #define InvalidCodePath Assert(!"Invalid Code Path");
+
+#include "calm_math.h"
 
 
 struct file_read_result
@@ -120,6 +126,37 @@ ClearMemory(void *Memory, u32 Size)
     {
         *At++ = 0;
     }
+}
+
+#define CopyArray(Source, Dest, Type, Count) MemoryCopy(Source, Dest, sizeof(Type)*Count);
+
+inline void
+MemoryCopy(void *Source, void *Dest, u32 Size)
+{
+    u8 *Source_u8 = (u8 *)Source;
+    u8 *Dest_u8 = (u8 *)Dest;
+    
+    while(Size--)
+    {
+        *Dest_u8++ = *Source_u8++;
+        
+    }
+}
+
+inline s32
+MemoryCopy(void *NullTerminatedSource, void *Dest)
+{
+    u8 *NullTerminatedSource_u8 = (u8 *)NullTerminatedSource;
+    u8 *Dest_u8 = (u8 *)Dest;
+    
+    s32 BytesWritten = 0;
+    while(*NullTerminatedSource_u8)
+    {
+        *Dest_u8++ = *NullTerminatedSource_u8++;
+        BytesWritten++;
+    }
+    
+    return BytesWritten;
 }
 
 

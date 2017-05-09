@@ -2,7 +2,8 @@
 enum entity_type
 {
     Entity_Null,
-    Entity_Object, 
+    Entity_Moveable_Object, 
+    Entity_Guru, 
     Entity_Player,
     Entity_Camera,
     
@@ -30,14 +31,17 @@ struct entity
 {
     v2 Pos;
     v2 Velocity;
+    //NOTE(oliver): This is used by the camera only at the moment 1/5/17
+    v2 AccelFromLastFrame; 
+    //
     v2 Dim;
     
     path_nodes Path;
     
     u32 VectorIndexAt;
     
-    v2 NewOffsetTargetP;
-    v2 OldOffsetTargetP;
+    v2 EndOffsetTargetP;
+    v2 BeginOffsetTargetP;
     
     r32 MoveT;
     r32 MovePeriod;
@@ -46,6 +50,8 @@ struct entity
     mat2 Rotation;
     r32 FacingDirection;    
     
+    b32 TriggerAction;
+    b32 IsInteractable;
     u32 Type;
     b32 Moves;
     

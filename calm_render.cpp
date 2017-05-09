@@ -223,8 +223,11 @@ CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear)
 internal void
 DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrigin_, rect2 Bounds, v4 Color = V4(1, 1, 1, 1))
 {
-    if(Bitmap)
-    {
+    if(Bitmap) {
+        
+        // TODO(OLIVER): This needs fixing for clip space
+        Bounds = Rect2(Max(Bounds.Min.X, 0), Max(Bounds.Min.Y, 0), Min(Bounds.Max.X, Buffer->Width), Min(Bounds.Max.Y, Buffer->Height));
+        ///////
         
         r32 Inv_255 = 1.0f / 255.0f;
         
@@ -439,21 +442,23 @@ DrawRectangle(bitmap *Buffer, rect2 Rect, v4 Color01)
              GetMaxCorner(Rect).X, GetMaxCorner(Rect).Y, Color255);
 }
 
-inline v2 Transform(render_group *Group, v2 Pos) {
-    v2 Result = Group->MetersToPixels * Pos;
-    Result += 0.5f*Group->ScreenDim;
+
+
+inline v2 Transform(transform *Transform, v2 Pos) {
+    v2 Result = Hadamard(Transform->Scale, Pos);
+    Result += Transform->Offset;
     return Result;
 }
 
-inline rect2 Transform(render_group *Group, rect2 Dim) {
-    rect2 Result = Rect2MinMax(Transform(Group, Dim.Min), Transform(Group, Dim.Max)); 
+inline rect2 Transform(transform *TransformPtr, rect2 Dim) {
+    rect2 Result = Rect2MinMax(Transform(TransformPtr, Dim.Min), Transform(TransformPtr, Dim.Max)); 
     return Result;
 }
 
-inline v2 InverseTransform(render_group *Group, v2 Pos) {
+inline v2 InverseTransform(transform *Transform, v2 Pos) {
     
-    v2 Result = Pos - 0.5f*Group->ScreenDim;
-    Result *= 1.0f / Group->MetersToPixels;
+    v2 Result = Pos - Transform->Offset;
+    Result = Hadamard(Result, V2(1.0f / Transform->Scale.X, 1.0f / Transform->Scale.Y));
     
     return Result;
 } 
@@ -466,35 +471,49 @@ void PushClear(render_group *Group, v4 Color) {
     Info->Color = Color;
 }
 
-void PushRectOutline(render_group *Group, rect2 Dim, v4 Color) {
+void PushRectOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color = V4(0, 0, 0, 1)) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_rect_outline) + sizeof(render_element_header));
     
     Header->Type = render_rect_outline;
     render_element_rect_outline *Info = (render_element_rect_outline *)(Header + 1);
     
-    Info->Dim = Transform(Group, Dim);
+    Info->ZDepth = ZDepth;
+    Info->Dim = Transform(&Group->Transform, Dim);
     Info->Color = Color;
 }
 
-void PushBitmap(render_group *Group, v2 Pos, bitmap *Bitmap, rect2 ClipRect) {
+void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
     
     Header->Type = render_bitmap;
     render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
     
-    Info->Pos = Transform(Group, Pos);
+    Info->Pos = Transform(&Group->Transform, Pos.XY);
+    Info->ZDepth = Pos.Z;
     Info->Bitmap = Bitmap;
     Info->ClipRect = ClipRect;
+    Info->Color = Color;
 }
 
-void PushRect(render_group *Group, rect2 Dim, v4 Color) {
+void PushRect(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_rect) + sizeof(render_element_header));
     
     Header->Type = render_rect;
     render_element_rect *Info = (render_element_rect *)(Header + 1);
     
-    Info->Dim = Transform(Group, Dim);
+    Info->ZDepth = ZDepth;
+    Info->Dim = Transform(&Group->Transform, Dim);
     Info->Color = Color;
+}
+
+internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, v2 Rotation) {
+    Group->ScreenDim = V2i(Buffer->Width, Buffer->Height);
+    Group->Buffer = Buffer;
+    Group->TempMem = MarkMemory(MemoryArena);
+    Group->Arena = SubMemoryArena(MemoryArena, MemorySize);
+    Group->Transform.Scale = Scale; 
+    Group->Transform.Offset = Offset;
+    Group->Transform.Rotation = Rotation;
 }
 
 void RenderGroupToOutput(render_group *Group) {
@@ -515,7 +534,7 @@ void RenderGroupToOutput(render_group *Group) {
             case render_bitmap: {
                 render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
                 
-                DrawBitmap(Group->Buffer, Info->Bitmap, Info->Pos.X, Info->Pos.Y, Info->ClipRect);
+                DrawBitmap(Group->Buffer, Info->Bitmap, Info->Pos.X, Info->Pos.Y, Info->ClipRect, Info->Color);
                 
                 At += sizeof(render_element_header) + sizeof(render_element_bitmap);
             } break;

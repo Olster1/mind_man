@@ -15,6 +15,13 @@ CeilRealToInt32(r32 Value)
     return Result;
 }
 
+inline s32
+FloorRealToInt32(r32 Value)
+{
+    s32 Result = (s32)floor(Value);
+    return Result;
+}
+
 
 inline r32
 Sin(r32 Value)

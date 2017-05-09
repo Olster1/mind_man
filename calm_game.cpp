@@ -65,7 +65,7 @@ internal animation *GetAnimation(animation *Animations, u32 AnimationsCount,  r3
 }
 
 #define GetChunkHash(X, Y) (Abs(X*19 + Y*23) % WORLD_CHUNK_HASH_SIZE)
-internal world_chunk *GetWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena) {
+internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena, chunk_type Type) {
     u32 HashIndex = GetChunkHash(X, Y);
     world_chunk *Chunk = Chunks[HashIndex];
     world_chunk *Result = 0;
@@ -84,9 +84,11 @@ internal world_chunk *GetWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_a
         Result  = PushStruct(Arena, world_chunk);
         Result->X = X;
         Result->Y = Y;
+        Result->Type = Type;
         Result->Next = Chunks[HashIndex];
         Chunks[HashIndex] = Result;
     }
+    
     return Result;
 }
 
@@ -134,19 +136,19 @@ inline b32 PushToList(world_chunk **WorldChunks, s32 X, s32 Y, s32 CameFromX, s3
     
     switch(SearchType) {
         case SEARCH_VALID_SQUARES: {
-            if(GetWorldChunk(WorldChunks, X, Y, 0) && !GetWorldChunk(VisitedHash, X, Y, 0)) {   
+            if(GetOrCreateWorldChunk(WorldChunks, X, Y, 0, chunk_null) && !GetOrCreateWorldChunk(VisitedHash, X, Y, 0, chunk_null)) {   
                 
-                GetWorldChunk(VisitedHash, X, Y, TempArena);
+                GetOrCreateWorldChunk(VisitedHash, X, Y, TempArena, chunk_null);
                 if(X == TargetP.X && Y == TargetP.Y) { 
                     Found = true;
                 } 
                 PushOnToList(SentinelPtr, X, Y, CameFromX, CameFromY, TempArena, FreeListPtr); 
             }
         } break;
-        case SEARCH_INVALID_SQUARES: {
-            if(!GetWorldChunk(VisitedHash, X, Y, 0)) {   
-                GetWorldChunk(VisitedHash, X, Y, TempArena);
-                if(GetWorldChunk(WorldChunks, X, Y, 0)) {
+        case SEARCH_INVALID_SQUARES: { 
+            if(!GetOrCreateWorldChunk(VisitedHash, X, Y, 0, chunk_null)) {   
+                GetOrCreateWorldChunk(VisitedHash, X, Y, TempArena, chunk_null);
+                if(GetOrCreateWorldChunk(WorldChunks, X, Y, 0, chunk_null)) {
                     Found = true;
                 }  
                 PushOnToList(SentinelPtr, X, Y, CameFromX, CameFromY, TempArena, FreeListPtr); 
@@ -209,10 +211,12 @@ internal search_cell *CalculatePath(game_state *GameState, world_chunk **WorldCh
         PUSH_TO_LIST((AtX - 1), AtY);
         PUSH_TO_LIST(AtX, (AtY + 1));
         PUSH_TO_LIST(AtX, (AtY - 1));
+#if MOVE_DIAGONAL
         PUSH_TO_LIST((AtX + 1), (AtY + 1));
         PUSH_TO_LIST((AtX + 1), (AtY - 1));
         PUSH_TO_LIST((AtX - 1), (AtY + 1));
         PUSH_TO_LIST((AtX - 1), (AtY - 1));
+#endif
         
         RemoveOffList(&Info->Sentinel, Cell, &Info->SearchCellList);
     }
@@ -286,7 +290,7 @@ internal v2i GetClosestPosition(game_state *GameState, v2i TargetP, v2i StartP) 
     search_cell *Cell = SearchCellList;
     Assert(SecondStageSearchInfo.Found);
     
-    Assert(GetWorldChunk(GameState->Chunks, Cell->Pos.X, Cell->Pos.Y, 0));
+    Assert(GetOrCreateWorldChunk(GameState->Chunks, Cell->Pos.X, Cell->Pos.Y, 0, chunk_null));
     
     Result = Cell->Pos;
     
@@ -294,17 +298,19 @@ internal v2i GetClosestPosition(game_state *GameState, v2i TargetP, v2i StartP) 
     return Result;
 }
 
-inline void BeginEntityPath(game_state *GameState, entity *Entity, v2i TargetP) {
+inline void BeginEntityPath(game_state *GameState, entity *Entity, v2i TargetP) { //TargetP is rounded; no offset
     v2i StartP = V2int(Entity->Pos.X / WorldChunkInMeters, Entity->Pos.Y / WorldChunkInMeters);
     
     TargetP = GetClosestPosition(GameState, TargetP, StartP);
     
     Entity->Path.Count = 0;
     RetrievePath(GameState, TargetP, StartP, &Entity->Path);
-    v2 *EndPoint = Entity->Path.Points + (Entity->Path.Count - 1);
+    v2 * EndPoint = Entity->Path.Points + (Entity->Path.Count - 1);
     v2 *StartPoint = Entity->Path.Points;
-    //*StartPoint = *StartPoint + Entity->OldOffsetTargetP;
-    //*EndPoint = *EndPoint + Entity->NewOffsetTargetP;
+    *StartPoint = *StartPoint + Entity->BeginOffsetTargetP;
+#if END_WITH_OFFSET
+    *EndPoint = *EndPoint + Entity->EndOffsetTargetP;
+#endif
     Entity->VectorIndexAt = 1;
 }
 
@@ -316,15 +322,26 @@ internal void UpdateEntityPositionViaFunction(game_state *GameState, entity *Ent
         
         Entity->MoveT += dt;
         
-        r32 tValue = Clamp(0,Entity->MoveT / Entity->MovePeriod, 1);
+        r32 Factor = (Length(B - A)/WorldChunkInMeters);
+        r32 MovePeriod = Entity->MovePeriod*Factor;
+        
+        r32 tValue = Clamp(0,Entity->MoveT / MovePeriod, 1);
+        if(Entity->VectorIndexAt == 1) {
+            //Entity->Pos = ExponentialUpLerp0To1(A, tValue, B);
+        }
+        else if(Entity->VectorIndexAt == (Entity->Path.Count - 1)) {
+            //Entity->Pos = ExponentialDownLerp0To1(A, tValue, B);
+        } else {
+            
+        }
         Entity->Pos = Lerp(A, tValue, B);
         
         v2 Direction = Normal(B - A);
         Entity->Velocity = 20.0f*Direction;
         
-        if(Entity->MoveT / Entity->MovePeriod >= 1.0f) {
+        if(Entity->MoveT / MovePeriod >= 1.0f) {
             Entity->Pos = B;
-            Entity->MoveT -= Entity->MovePeriod;
+            Entity->MoveT -= MovePeriod;
             Entity->VectorIndexAt++;
             
         }
@@ -359,11 +376,11 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         /////////////////////////////////
         
         GameState->RenderConsole = true;
-        GameState->Player = InitEntity(GameState, V2(0, 0), V2(0.5, 1), Entity_Player);
+        GameState->Player = InitEntity(GameState, V2(0, 0), V2(WorldChunkInMeters, WorldChunkInMeters), Entity_Player);
         
         GameState->Camera = InitEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera);
         
-        //InitEntity(GameState, V2(2, 2), V2(1, 1), Entity_Object);
+        InitEntity(GameState, V2(2, 2), V2(1, 1), Entity_Guru, true);
         
         GameState->BackgroundMusic = LoadWavFileDEBUG(Memory, "Moonlight_Hall.wav", &GameState->MemoryArena);
         PushSound(GameState, &GameState->BackgroundMusic, 1.0, true);
@@ -399,13 +416,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         
         GameState->Fonts = LoadFontFile("fonts.clm", Memory, &GameState->MemoryArena);
         
-        r32 Qualities[FontQuality_Count] = {};
-        Qualities[FontQuality_Debug] = 0.0f;
-        Qualities[FontQuality_Size] = 1.0f;
+        font_quality_value Qualities[FontQuality_Count] = {};
+        Qualities[FontQuality_Debug] = InitFontQualityValue(1.0f);
+        Qualities[FontQuality_Size] = InitFontQualityValue(1.0f);
         
+        //GameState->Font = FindFont(GameState->Fonts, Qualities);
+        GameState->DebugFont = FindFontByName(GameState->Fonts, "Liberation Mono", Qualities);
+        GameState->GameFont = FindFontByName(GameState->Fonts, "Karmina Regular", Qualities);
         
-        GameState->Font = FindFont(GameState->Fonts, Qualities);
-        InitConsole(&DebugConsole, GameState->Font, Buffer, 2.0f, &GameState->MemoryArena);
+        InitConsole(&DebugConsole, GameState->DebugFont, 0, 2.0f, &GameState->MemoryArena);
         
         GameState->MenuPeriod = 2.0f;
         
@@ -414,11 +433,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
         GameState->FrameTime = 0;
         GameState->CurrentAnimation = &GameState->LanternManAnimations[0];
         
-        for(u32 Y = 0; Y < 30; ++Y) {
-            for(u32 X = 0; X < 30; ++X) {
-                world_chunk *Result = GetWorldChunk(GameState->Chunks, X, Y, &GameState->MemoryArena);
-                Assert(Result);
-            }
+        s32 Range = 10;
+        fori_count(700) {
+            s32 Y = RandomBetween(&GameState->GeneralEntropy, -Range, Range);
+            s32 X = RandomBetween(&GameState->GeneralEntropy, -Range, Range);
+            
+            u32 ChunkType = RandomChoice(&GameState->GeneralEntropy, ((u32)chunk_type_count - 1)) + 1;
+            world_chunk *Result = GetOrCreateWorldChunk(GameState->Chunks, X, Y, &GameState->MemoryArena, (chunk_type)ChunkType);
+            Assert(Result);
+            
         }
         
         GameState->IsInitialized = true;
@@ -426,12 +449,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
     
     temp_memory PerFrameMemory = MarkMemory(&GameState->PerFrameArena);
     
-    render_group RenderGroup_ = {};
-    RenderGroup_.MetersToPixels = 60.0f;
-    RenderGroup_.ScreenDim = V2i(Buffer->Width, Buffer->Height);
-    RenderGroup_.Buffer = Buffer;
-    RenderGroup_.TempMem = MarkMemory(&GameState->PerFrameArena);
-    RenderGroup_.Arena = SubMemoryArena(&GameState->PerFrameArena, MegaBytes(1));
+    render_group OrthoRenderGroup;
+    InitRenderGroup(&OrthoRenderGroup, Buffer, &GameState->PerFrameArena, MegaBytes(1), V2(1, 1), V2(0, 0), V2(1, 0));
+    DebugConsole.RenderGroup = &OrthoRenderGroup;
+    
+    render_group RenderGroup_;
+    InitRenderGroup(&RenderGroup_, Buffer, &GameState->PerFrameArena, MegaBytes(1), V2(60, 60), 0.5f*V2(Buffer->Width, Buffer->Height), V2(1, 0));
     
     render_group *RenderGroup = &RenderGroup_;
     
@@ -441,13 +464,14 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
     
     switch(GameState->GameMode) {
         case MENU_MODE: {
-            
-            UpdateMenu(GameState, Memory, Buffer, dt);
+            UpdateMenu(GameState, Memory, &OrthoRenderGroup, dt);
+            GameState->RenderConsole = false;
             
         } break;
         case PLAY_MODE: {
+            GameState->RenderConsole = true;
             v2 CamPos = GameState->Camera->Pos;
-            v2 MouseP = InverseTransform(RenderGroup, V2(Memory->MouseX, Memory->MouseY));
+            v2 MouseP = InverseTransform(&RenderGroup->Transform, V2(Memory->MouseX, Memory->MouseY));
             
             if(WasPressed(Memory->GameButtons[Button_Escape]))
             {
@@ -456,15 +480,45 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
             }
             if(WasPressed(Memory->GameButtons[Button_F1]))
             {
-                DebugConsole.ViewMode = (DebugConsole.ViewMode == VIEW_MID) ? VIEW_CLOSE : VIEW_MID;
-                DebugConsole.InputIsActive = !DebugConsole.InputIsActive;
+                if(DebugConsole.ViewMode == VIEW_MID) {
+                    DebugConsole.ViewMode = VIEW_CLOSE;
+                    DebugConsole.InputIsActive = false;
+                } else {
+                    DebugConsole.ViewMode = VIEW_MID;
+                    DebugConsole.InputIsActive = true;
+                    DebugConsole.InputClickTimer.Value = 0;
+                }
+                
             }
             if(WasPressed(Memory->GameButtons[Button_F2]))
             {
-                DebugConsole.ViewMode = (DebugConsole.ViewMode == VIEW_FULL) ? VIEW_CLOSE : VIEW_FULL;
-                DebugConsole.InputIsActive = !DebugConsole.InputIsActive;
-                
+                if(DebugConsole.ViewMode == VIEW_FULL) {
+                    DebugConsole.ViewMode = VIEW_CLOSE;
+                    DebugConsole.InputIsActive = false;
+                } else {
+                    DebugConsole.ViewMode = VIEW_FULL;
+                    DebugConsole.InputIsActive = true;
+                    DebugConsole.InputClickTimer.Value = 0;
+                }
             }
+            
+            if(WasPressed(Memory->GameButtons[Button_LeftMouse]))
+            {
+                if(InBounds(DebugConsole.InputConsoleRect, Memory->MouseX, Memory->MouseY)) {
+                    DebugConsole.InputIsHot = true;
+                }
+            }
+            if(WasReleased(Memory->GameButtons[Button_LeftMouse])) {
+                
+                if(InBounds(DebugConsole.InputConsoleRect, Memory->MouseX, Memory->MouseY) && DebugConsole.InputIsHot) {
+                    DebugConsole.InputIsHot = false;
+                    DebugConsole.InputIsActive = true;
+                    DebugConsole.InputClickTimer.Value = 0;
+                } else if(!DebugConsole.InputIsHot){
+                    DebugConsole.InputIsActive = false;
+                }
+            }
+            
             if(DebugConsole.InputIsActive) {
                 if(WasPressed(Memory->GameButtons[Button_Arrow_Left])) {
                     DebugConsole.Input.WriteIndexAt = Max(0, (s32)DebugConsole.Input.WriteIndexAt - 1);
@@ -517,15 +571,14 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                     
                 }
                 
-                if(WasPressed(Memory->GameButtons[Button_LeftMouse]))
-                {
+                if(WasPressed(Memory->GameButtons[Button_LeftMouse])) {
                     if(IsDown(Memory->GameButtons[Button_Shift])) {
                         s32 CellX = (s32)(floor(MouseP.X / WorldChunkInMeters));
                         s32 CellY = (s32)(floor(MouseP.Y / WorldChunkInMeters));
                         
                         
-                        if(!GetWorldChunk(GameState->Chunks, CellX, CellY, 0)) {
-                            world_chunk *Chunk = GetWorldChunk(GameState->Chunks, CellX, CellY, &GameState->MemoryArena);
+                        if(!GetOrCreateWorldChunk(GameState->Chunks, CellX, CellY, 0, chunk_null)) {
+                            world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, CellX, CellY, &GameState->MemoryArena, chunk_grass);
                             Assert(Chunk);
                             // TODO(OLIVER): Maybe make the return type a double ptr so we can assign it straight away.
                         }
@@ -534,7 +587,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                         entity *NextHotEntity = 0;
                         for(u32 i = 0; i < GameState->EntityCount; ++i) {
                             entity *Entity = GameState->Entities + i;
-                            if(Entity->Type == Entity_Object) {
+                            if(Entity->IsInteractable) {
                                 
                                 v2 EntityRelP = Entity->Pos - CamPos;
                                 
@@ -547,19 +600,20 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                         
                         if(!GameState->InteractingWith) {
                             if(!NextHotEntity) {
+                                //NOTE: This is where we move the player.
                                 v2 TargetP_r32 = MouseP + GameState->Camera->Pos;
-                                r32 InverseWorldChunkToMeters = 1.0f / WorldChunkInMeters;
+                                r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
                                 
-                                v2i TargetP = ToV2i(InverseWorldChunkToMeters*TargetP_r32); 
+                                v2i TargetP = ToV2i_floor(MetersToWorldChunks*TargetP_r32); 
                                 
-                                Player->OldOffsetTargetP = Player->NewOffsetTargetP;
+                                Player->BeginOffsetTargetP = Player->Pos- WorldChunkInMeters*ToV2i(MetersToWorldChunks*Player->Pos); ;
                                 
-                                Player->NewOffsetTargetP = TargetP_r32 - WorldChunkInMeters*ToV2(TargetP);
+                                Player->EndOffsetTargetP = TargetP_r32 - WorldChunkInMeters*ToV2(TargetP);
                                 
                                 BeginEntityPath(GameState, Player, TargetP);
-                                
                                 Player->MoveT = 0;
                             } else {
+                                //NOTE: This is interactable objects;
                                 GameState->HotEntity = NextHotEntity;
                                 GameState->InteractingWith = GameState->HotEntity;
                             }
@@ -568,15 +622,31 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                 }
                 if(WasReleased(Memory->GameButtons[Button_LeftMouse])) {
                     
-                    GameState->InteractingWith = 0;
+                    //MOUSE BUTTON RELEASED ACTIONS
+                    if(GameState->InteractingWith) {
+                        switch(GameState->InteractingWith->Type) {
+                            case Entity_Guru: {
+                                GameState->InteractingWith->TriggerAction = true;
+                            }
+                        }
+                        
+                        GameState->InteractingWith = 0;
+                    }
                 }
                 
                 if(GameState->InteractingWith) {
-                    GameState->InteractingWith->Pos = MouseP + CamPos;
+                    //MOUSE BUTTON DOWN ACTIONS
+                    switch(GameState->InteractingWith->Type) {
+                        case Entity_Moveable_Object: {
+                            GameState->InteractingWith->Pos = MouseP + CamPos;
+                        } break;
+                        default: {
+                            AddToOutBuffer("There is no release interaction for the object type %d\n", GameState->InteractingWith->Type); //TODO(oliver): This would be a good place for a meta program: All enum structs could have a method GetEnumAlias(entity_type, TypeValue);
+                        }
+                    }
+                    
                     
                 }
-                
-                
             }
             
             r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
@@ -601,10 +671,16 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
             
             rect2 BufferRect = Rect2(0, 0, Buffer->Width, Buffer->Height);
             
-#define UPDATE_CAMERA_POS 0
+#define UPDATE_CAMERA_POS 1
             
 #if UPDATE_CAMERA_POS
-            UpdateEntityPosViaFunction(GameState->Camera, dt);
+            
+            entity *Camera = GameState->Camera;
+            r32 DragFactor = 0.4f;
+            v2 Acceleration = Camera->AccelFromLastFrame;
+            Camera->Pos = dt*dt*Acceleration + dt*Camera->Velocity + Camera->Pos;
+            Camera->Velocity = Camera->Velocity + dt*Acceleration - DragFactor*Camera->Velocity;
+            
 #endif
             
 #define DRAW_GRID 1
@@ -615,17 +691,33 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                 world_chunk *Chunk = GameState->Chunks[j];
                 
                 while(Chunk) {
-                    r32 MinX = Chunk->X*WorldChunkInMeters;
-                    r32 MinY = Chunk->Y*WorldChunkInMeters;
+                    r32 MinX = Chunk->X*WorldChunkInMeters - GameState->Camera->Pos.X;
+                    r32 MinY = Chunk->Y*WorldChunkInMeters - GameState->Camera->Pos.Y;
                     rect2 Rect = Rect2(MinX, MinY, MinX + WorldChunkInMeters,
                                        MinY + WorldChunkInMeters);
                     
+                    v4 Color01 = {0, 0, 0, 1};
+                    switch (Chunk->Type) {
+                        case chunk_grass: {
+                            Color01 = {0, 1, 0, 1};
+                        } break;
+                        case chunk_fire: {
+                            Color01 = {1, 0, 0, 1};
+                        } break;
+                        case chunk_water: {
+                            Color01 = {0, 0, 1, 1};
+                        } break;
+                        default: {
+                            InvalidCodePath;
+                        }
+                        
+                    }
+                    
                     if(IsPartOfPath(Chunk->X, Chunk->Y, &Player->Path)) {
-                        v4 Color01 = {1, 0, 1, 1};
-                        PushRect(RenderGroup, Rect, Color01);
+                        Color01 = {1, 0, 1, 1};
+                        PushRect(RenderGroup, Rect, 1, Color01);
                     } else {
-                        v4 Color01 = {0, 0, 0, 1};
-                        PushRectOutline(RenderGroup, Rect, Color01);
+                        PushRect(RenderGroup, Rect, 1, Color01);
                     }
                     
                     
@@ -634,8 +726,13 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                 }
             }
 #endif
-#define MOVE_VIA_ACCELERATION 0
             
+            
+            r32 PercentOfScreen = 0.1f;
+            v2 CameraWindow = (1.0f/MetersToPixels)*PercentOfScreen*V2(Buffer->Width, Buffer->Height);
+            //NOTE(): Draw Camera bounds that the player stays within. 
+            PushRectOutline(RenderGroup, Rect2(-CameraWindow.X, -CameraWindow.Y, CameraWindow.X, CameraWindow.Y), 1, V4(1, 0, 1, 1));
+            ////
             for(u32 EntityIndex = 0; EntityIndex < GameState->EntityCount; ++EntityIndex)
             {
                 entity *Entity = GameState->Entities + EntityIndex;
@@ -645,7 +742,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                     v2 CamPos = GameState->Camera->Pos;
                     v2 EntityRelP = Entity->Pos - CamPos;
                     
-                    rect2 EntityAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
+                    rect2 EntityAsRect = Rect2MinDim(EntityRelP, Entity->Dim);
                     
                     switch(Entity->Type)
                     {
@@ -653,20 +750,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                         {
                             UpdateEntityPositionViaFunction(GameState, Entity, dt);
                             
-#if 0
-                            v2 CameraWindow = (1.0f/MetersToPixels)*V2(Buffer->Width/3, Buffer->Height/3);
-                            
-                            
-                            // TODO(OLIVER): WORK ON CAMERA MOVEMENT!!!!!
-                            if(!GameState->Camera->Moving && (Abs(EntityRelP.X) > CameraWindow.X || Abs(EntityRelP.Y) > CameraWindow.Y)) {
-                                
-                                GameState->Camera->Moving = true;
-                                GameState->Camera->MoveT = 0;
-                                
-                                GameState->Camera->StartPos = GameState->Camera->Pos;
-                                GameState->Camera->TargetPos = Entity->Pos - V2(Buffer->Width/2, Buffer->Height/2);
+                            if((Abs(EntityRelP.X) > CameraWindow.X || Abs(EntityRelP.Y) > CameraWindow.Y)) {
+                                Camera->AccelFromLastFrame = 10.0f*EntityRelP;
+                            } else {
+                                Camera->AccelFromLastFrame = V2(0, 0);
                             }
-#endif
+                            
                             if(GameState->CurrentAnimation) {
                                 bitmap CurrentBitmap = GameState->CurrentAnimation->Frames[GameState->FrameIndex];
                                 
@@ -679,33 +768,47 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, r32 dt)
                                     }
                                 }
                                 
-                                PushBitmap(RenderGroup, EntityRelP,&CurrentBitmap,  BufferRect);
+                                //PushBitmap(RenderGroup, V3(EntityRelP, 1), &CurrentBitmap,  BufferRect);
                                 
-                                PushRect(RenderGroup, EntityAsRect, V4(1, 0, 1, 1));
+                                PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
                             }
                         } break;
-                        case Entity_Object: {
+                        case Entity_Moveable_Object: {
+                            //PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 1, 1));
+                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->MossBlockBitmap,  BufferRect);
+                        } break;
+                        case((u32)Entity_Guru): {
+                            PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 1, 1));
+                            if(Entity->TriggerAction) {
+                                //AddToOutBuffer("TriggerAction");
+                                draw_text_options TextOptions = InitDrawOptions();
+                                TextOptions.AdvanceYAtStart = true;
+                                char *DialogString = "Hello there weary traveller, how have you been?";
+                                rect2 Bounds = Rect2MinMaxWithCheck(V2(EntityRelP.X, EntityRelP.Y), V2(EntityRelP.X + 4, EntityRelP.Y - 4));
+                                PushRectOutline(RenderGroup, Bounds, 1, V4(0, 1, 1, 1));
+                                
+                                TextToOutput(RenderGroup, GameState->GameFont, DialogString, EntityRelP.X, EntityRelP.Y, Bounds, V4(0, 0, 0, 1), &TextOptions);
+                                
+                                
+                            }
                             
-                            PushBitmap(RenderGroup, EntityRelP,&GameState->MossBlockBitmap,  BufferRect);
-                            
-                            PushRect(RenderGroup, EntityAsRect, V4(1, 0, 1, 1));
+                            //PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->MossBlockBitmap,  BufferRect);
                         } break;
                     }
                 }
             }
             
-            PushBitmap(RenderGroup, MouseP,&GameState->MagicianHandBitmap,  BufferRect);
-            
-            
+            PushBitmap(RenderGroup, V3(MouseP, 1), &GameState->MagicianHandBitmap,  BufferRect);
         }
     }
     
     
-    RenderGroupToOutput(RenderGroup);
-    
     if(GameState->RenderConsole) {
         RenderConsole(&DebugConsole, dt); 
     }
+    
+    RenderGroupToOutput(RenderGroup);
+    RenderGroupToOutput(&OrthoRenderGroup);
     
     ReleaseMemory(&PerFrameMemory);
 }
