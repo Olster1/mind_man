@@ -33,6 +33,7 @@ struct render_element_bitmap
     rect2 ClipRect;
     v4 Color;
     r32 ZDepth;
+    v2 Dim;
 };
 
 struct render_element_rect
@@ -69,7 +70,7 @@ struct render_group
     
 };
 
-void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, rect2 ClipRect, v4 Color);
+void PushBitmapScale(render_group *Group, v3 Pos, bitmap *Bitmap, r32 Scale, rect2 ClipRect, v4 Color);
 
 inline v2 Transform(transform *Transform, v2 Pos);
 inline rect2 Transform(transform *TransformPtr, rect2 Dim);

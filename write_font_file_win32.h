@@ -38,12 +38,12 @@ Win32WriteFontFile()
                                           0,
                                           0);
     
-    char *FileName = "fonts.clm";
+    char *FileNameFontFile = "fonts.clm";
     HANDLE FileHandle;
     for(;;)
     {
         FileHandle = CreateFile(
-            FileName,
+            FileNameFontFile,
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             0,
@@ -54,7 +54,7 @@ Win32WriteFontFile()
         if(GetLastError() == ERROR_ALREADY_EXISTS)
         {
             CloseHandle(FileHandle);
-            DeleteFile(FileName);
+            DeleteFile(FileNameFontFile);
         }
         else
         {
@@ -246,7 +246,7 @@ Win32WriteFontFile()
             
             {
                 u8 *Dest_u8 = (u8 *)Glyph.Bitmap.Bits;
-                u8 *Source_u8 = (u8 *)DCBits;
+                Source_u8 = (u8 *)DCBits;
                 
                 for(u32 Y = 0;
                     Y < Glyph.Bitmap.Height;

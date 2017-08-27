@@ -1,0 +1,5 @@
+Do text sizes on the renderer. 
+
+Make moving easier
+
+

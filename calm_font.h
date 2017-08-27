@@ -228,6 +228,20 @@ inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, r32 
     
 }
 
+//This check is with y-axis pointing up: so for Y it is actually a min check. Maybe I should try the ortho projection?
+inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, r32 *XCursor, r32 *YCursor, rect2 Bounds, r32 LineAdvanceModifier, b32 NewLineSensitive, transform *Transform, r32 *XCursorMax, r32 *YCursorMax) {
+    
+    AdvanceCursor(Font, LastCodePoint, CheesePoint,XCursor, YCursor, Bounds, LineAdvanceModifier, NewLineSensitive, Transform);
+    
+    if(*XCursor > *XCursorMax) {
+        *XCursorMax = *XCursor;
+    }
+    if(*YCursor < *YCursorMax) {
+        *YCursorMax = *YCursor;
+    }
+    
+}
+
 internal void DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrigin_, rect2 Bounds, v4 Color);
 
 struct draw_text_options {
@@ -237,6 +251,7 @@ struct draw_text_options {
     b32 NewLineSensitive;
     r32 ZDepth;
     b32 AdvanceYAtStart;
+    b32 MaxCursorPos; //Returns the max position the cursor reached. 
 };
 
 inline draw_text_options InitDrawOptions() {
@@ -247,6 +262,8 @@ inline draw_text_options InitDrawOptions() {
     Result.NewLineSensitive = true;
     Result.ZDepth = 0.0f;
     Result.AdvanceYAtStart = false;
+    Result.MaxCursorPos = false;
+    
     return Result;
 }
 
@@ -254,6 +271,8 @@ inline draw_text_options InitDrawOptions() {
 internal v2i
 TextToOutput(render_group *Group, font *Font, char *String, r32 XCursor, r32 YCursor, rect2 Bounds, v4 Color, draw_text_options *Options) {
     char LastCodePoint = 0;
+    r32 MaxXCursor = XCursor;
+    r32 MaxYCursor = YCursor;
     
     if(Options->AdvanceYAtStart) {
         // NOTE(OLIVER): Remember the line advance is normally -1 for text being written downwards. So we add the line advance to move downwards. 
@@ -267,16 +286,24 @@ TextToOutput(render_group *Group, font *Font, char *String, r32 XCursor, r32 YCu
     {
         char CheesePoint = *Letter; // TODO(OLIVER): Handle UTF-8 strings!
         
-        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform);
+        AdvanceCursor(Font, LastCodePoint, CheesePoint, &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform, &MaxXCursor, &MaxYCursor);
         if(Options->DisplayText) {
-            PushBitmap(Group, V3(XCursor, YCursor, Options->ZDepth), GetFontGlyphBitmap(Font, CheesePoint), Transform(&Group->Transform, Bounds), Color);
+            bitmap *FontGlyphBitmap = GetFontGlyphBitmap(Font, CheesePoint);
+            if(FontGlyphBitmap) {
+                PushBitmapScale(Group, V3(XCursor, YCursor, Options->ZDepth),FontGlyphBitmap, 1.0f, Transform(&Group->Transform, Bounds), Color);
+            }
         }
         LastCodePoint = CheesePoint;                
     }
     
-    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform);
+    AdvanceCursor(Font, LastCodePoint, '\0', &XCursor, &YCursor, Bounds, Options->LineAdvanceModifier, Options->NewLineSensitive, &Group->Transform, &MaxXCursor, &MaxYCursor);
     
-    v2i CursorP = V2int(XCursor, YCursor);
+    v2i CursorP = V2int((s32)XCursor, (s32)YCursor);
+    
+    if(Options->MaxCursorPos) {
+        CursorP = V2int((s32)MaxXCursor, (s32)MaxYCursor);
+    } 
+    
     return  CursorP;
 }
 

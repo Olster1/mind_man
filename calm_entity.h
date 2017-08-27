@@ -2,16 +2,23 @@
 enum entity_type
 {
     Entity_Null,
-    Entity_Moveable_Object, 
+    Entity_Block, 
     Entity_Guru, 
+    Entity_Philosopher,
     Entity_Player,
+    Entity_Chunk_Changer,
     Entity_Camera,
+    Entity_Dropper,
+    Entity_Home,
     
+    ///////
+    Entity_Count,
 };
 
 enum search_type {
     SEARCH_VALID_SQUARES,
     SEARCH_INVALID_SQUARES,
+    SEARCH_FOR_TYPE,
 };
 
 struct search_cell {
@@ -31,14 +38,42 @@ struct entity
 {
     v2 Pos;
     v2 Velocity;
+    v2 Dim;
+    
+    // NOTE(Oliver): This is for the chunk changer
+    u32 ChunkAt;
+    u32 ChunkListCount;
+    chunk_type ChunkList[16];
+    timer ChunkTimer; 
+    b32 LoopChunks;
+    //
+    
+    u32 WalkSoundAt; //For Sound effects
+    
+    r32 LifeSpan;//seconds
+    
     //NOTE(oliver): This is used by the camera only at the moment 1/5/17
     v2 AccelFromLastFrame; 
     //
-    v2 Dim;
+    
+    //For UI editor. Maybe move it to the UI element struct. Oliver 13/8/17 
+    v2 RollBackPos;
+    //
+    
+    
+    // NOTE(OLIVER): This is for the philosopher AI random walk
+    v2i LastMoves[1];
+    u32 LastMoveAt;
+    v2i LastSearchPos;
+    //
+    
+    u32 VectorIndexAt;
+    u32 ChunkTypeCount;
+    chunk_type ValidChunkTypes[16];
     
     path_nodes Path;
     
-    u32 VectorIndexAt;
+    b32 IsAtEndOfMove;
     
     v2 EndOffsetTargetP;
     v2 BeginOffsetTargetP;
@@ -52,7 +87,7 @@ struct entity
     
     b32 TriggerAction;
     b32 IsInteractable;
-    u32 Type;
+    entity_type Type;
     b32 Moves;
     
     r32 InverseWeight;

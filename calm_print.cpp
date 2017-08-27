@@ -157,12 +157,12 @@
                  } break;
                  case 'd':
                  {
-                     s32 Argument = NextArgument(Arguments, s64); 
+                     s32 Argument = (s32)NextArgument(Arguments, s64); 
                      ToString(Argument, &TextBufferAt, SizeRemaining);
                  } break;
                  case 'f':
                  {
-                     r32 Argument = NextArgument(Arguments, r64); 
+                     r32 Argument = (r32)NextArgument(Arguments, r64); 
                      ToString((r32)Argument, &TextBufferAt, SizeRemaining, PlacesPtr);
                      
                      PlacesPtr = 0;
@@ -202,15 +202,16 @@
      }
      
      
-     s32 SizeOfString = (TextBufferAt - TextBuffer);
+     s32 SizeOfString = (s32)(TextBufferAt - TextBuffer);
      Assert(SizeOfString >= 0);
      return SizeOfString;
  }
  
- inline void Print_(char *TextBuffer, u32 TextBufferSize, char *FormatString, ...) {
+ inline s32 Print_(char *TextBuffer, u32 TextBufferSize, char *FormatString, ...) {
      
      u8 *Arguments = ((u8 *)&FormatString) + sizeof(FormatString);
      
      //sprintf_s(TextBuffer, TextBufferSize, FormatString, *Arguments);
-     Print__(TextBuffer, TextBufferSize, FormatString, Arguments);
+     s32 SizeOfString = Print__(TextBuffer, TextBufferSize, FormatString, Arguments);
+     return SizeOfString;
  }

@@ -7,37 +7,6 @@
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
 
-struct v2
-{
-    union
-    {
-        struct
-        {
-            r32 X, Y;
-        };
-        struct
-        {
-            r32 U, V;
-        };
-    };
-};
-
-struct v2i
-{
-    union
-    {
-        struct
-        {
-            s32 X, Y;
-        };
-        struct
-        {
-            s32 U, V;
-        };
-    };
-};
-
-
 struct v3
 {
     union
@@ -141,6 +110,16 @@ V2i(s32 X, s32 Y)
     return Result;
 }
 
+inline v2
+V2i(v2i A)
+{
+    v2 Result;
+    Result.X = (r32)A.X;
+    Result.Y = (r32)A.Y;
+    
+    return Result;
+}
+
 inline v3
 V3(r32 X, r32 Y, r32 Z)
 {
@@ -187,6 +166,20 @@ SafeRatio0(r32 A, r32 B)
     return Result;
 }
 
+
+inline r32
+SafeRatio1(r32 A, r32 B)
+{
+    r32 Result = 1.0f;
+    if(B != 0.0f)
+    {
+        Result = A / B;
+    }
+    
+    return Result;
+}
+
+
 inline u32 
 Power(u32 Value, u32 Exponent)
 {
@@ -220,26 +213,26 @@ Lerp(r32 A, r32 t, r32 B)
 
 
 inline r32 SineousLerp0To1(r32 A, r32 t, r32 B) {
-    r32 TransformedT = sin(t*PI32/2);
+    r32 TransformedT = (r32)sin(t*PI32/2);
     r32 Result = Lerp(A, TransformedT, B);
     return Result;
 }
 
 inline r32 ExponentialUpLerp0To1(r32 A, r32 t, r32 B) {
-    r32 TransformedT = sin(t*PI32/4);
+    r32 TransformedT = (r32)sin(t*PI32/4);
     r32 Result = Lerp(A, TransformedT, B);
     return Result;
 }
 
 inline r32 ExponentialDownLerp0To1(r32 A, r32 t, r32 B) {
-    r32 TransformedT = sin((t*PI32/4) - PI32/4);
-    Assert(TransformedT >= 0 && TransformedT <= 1.0);
+    r32 TransformedT = (r32)sin((t*PI32/4) - PI32/4);
+    Assert((TransformedT >= 0.0f && TransformedT <= 1.0f));
     r32 Result = Lerp(A, TransformedT, B);
     return Result;
 }
 
 inline r32 SineousLerp0To0(r32 A, r32 t, r32 B) {
-    r32 TransformedT = sin(t*PI32);
+    r32 TransformedT = (r32)sin(t*PI32);
     r32 Result = Lerp(A, TransformedT, B);
     return Result;
 }
@@ -250,6 +243,57 @@ inline r32 Clamp(r32 Min, r32 Value, r32 Max) {
     }
     if(Value > Max) {
         Value = Max;
+    }
+    return Value;
+}
+
+
+inline s32 ClampS32(s32 Min, s32 Value, s32 Max) {
+    if(Value < Min) {
+        Value = Min;
+    }
+    if(Value > Max) {
+        Value = Max;
+    }
+    return Value;
+}
+
+inline u32 ClampU32(u32 Min, u32 Value, u32 Max) {
+    if(Value < Min) {
+        Value = Min;
+    }
+    if(Value > Max) {
+        Value = Max;
+    }
+    return Value;
+}
+
+inline r32 Wrap(r32 Min, r32 Value, r32 Max) {
+    if(Value < Min) {
+        Value = Max;
+    }
+    if(Value > Max) {
+        Value = Min;
+    }
+    return Value;
+}
+
+inline s32 WrapS32(s32 Min, s32 Value, s32 Max) {
+    if(Value < Min) {
+        Value = Max;
+    }
+    if(Value > Max) {
+        Value = Min;
+    }
+    return Value;
+}
+
+inline u32 WrapU32(u32 Min, u32 Value, u32 Max) {
+    if(Value < Min) {
+        Value = Max;
+    }
+    if(Value > Max) {
+        Value = Min;
     }
     return Value;
 }
@@ -407,13 +451,13 @@ Lerp(v2 A, r32 t, v2 B)
 }
 
 inline v2 SineousLerp0To1(v2 A, r32 t, v2 B) {
-    r32 TransformedT = sin(t*PI32/2);
+    r32 TransformedT = (r32)sin(t*PI32/2);
     v2 Result = Lerp(A, TransformedT, B);
     return Result;
 }
 
 inline v2 SineousLerp0To0(v2 A, r32 t, v2 B) {
-    r32 TransformedT = sin(t*PI32);
+    r32 TransformedT = (r32)sin(t*PI32);
     v2 Result = Lerp(A, TransformedT, B);
     return Result;
 }
@@ -495,6 +539,12 @@ Hadamard(v2 A, v2 B)
 }
 
 inline v2
+Inverse(v2 A) {
+    v2 Result = V2(1.0f / A.X, 1.0f / A.Y);
+    return Result;
+}
+
+inline v2
 ToV2(v2i In)
 {
     v2 Result = V2i(In.X, In.Y);
@@ -512,6 +562,13 @@ inline v2i
 ToV2i_floor(v2 In)
 {
     v2i Result = V2int(FloorRealToInt32(In.X), FloorRealToInt32(In.Y));
+    return Result;
+}
+
+inline v2i
+ToV2i_ceil(v2 In)
+{
+    v2i Result = V2int(CeilRealToInt32(In.X), CeilRealToInt32(In.Y));
     return Result;
 }
 
@@ -767,6 +824,12 @@ Rect2OriginCenterDim(v2 Dim)
     return Result;
 }
 
+inline rect2 
+Rect2MinMaxInvertY(v2 Min, v2 Max) {
+    rect2 Result = Rect2MinMax(V2(Min.X, Max.Y), V2(Max.X, Min.Y));
+    return Result;
+}
+
 inline v2
 GetMinCorner(rect2 Rect)
 {
@@ -783,7 +846,7 @@ GetMaxCorner(rect2 Rect)
 inline b32
 InBounds(rect2 Rect, s32 X, s32 Y)
 {
-    v2 Point = V2(X, Y);
+    v2 Point = V2i(X, Y);
     b32 Result = (Point.X >= Rect.Min.X &&
                   Point.Y >= Rect.Min.Y &&
                   Point.X < Rect.Max.X &&
@@ -838,6 +901,18 @@ Union(rect2 A, rect2 B)
     return Result;
     
 }
+
+inline rect2 ClipLeftX(v2 Min, rect2 Rect) {
+    
+    rect2 Result = Rect;
+    
+    if(Rect.Min.X < Min.X) {
+        Rect.Min.X = Min.X;
+    }
+    
+    return Result;
+}
+
 
 b32
 operator ==(rect2 A, rect2 B)

@@ -23,6 +23,7 @@ typedef float r32;
 typedef double r64;
 typedef u32 b32;
 
+typedef intptr_t intptr;
 
 #define InvalidCodePath (*((u8 *)0) = 0);
 #define Assert(Statement) if(!(Statement)) { InvalidCodePath }
@@ -65,6 +66,7 @@ enum file_handle {
     KEY_FUNCTIONS_FILE,
     KEY_TYPES_FILE, 
     META_FILE,
+    ENUM_STRUCTS,
     
     FILE_HANDLE_COUNT
 };
@@ -125,7 +127,26 @@ static void EatAllWhiteSpace(tokenizer *Tokenizer)
     {
         Tokenizer->At++;
     }
-    
+}
+
+static void EatComments(tokenizer *Tokenizer, token LastToken) {
+    Assert(LastToken.Type == Token_ForwardSlash);
+    if(*(Tokenizer->At) == '/') {
+        while(*(Tokenizer->At) != '\n' && *(Tokenizer->At) != '\r') {
+            Tokenizer->At++;
+        }
+    } else if(*(Tokenizer->At) == '*') {
+        while(*(Tokenizer->At) == '\0') {
+            Tokenizer->At++;
+            if(*(Tokenizer->At) == '*') {
+                Tokenizer->At++;
+                if(*(Tokenizer->At) == '/') {
+                    Tokenizer->At++;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 inline void
@@ -279,7 +300,7 @@ static token GetNextToken(tokenizer *Tokenizer)
                 Tokenizer->At++;
             }
             
-            Token.TextLength = ((u32)Tokenizer->At - (u32)Token.Text);
+            Token.TextLength = (u32)((intptr)Tokenizer->At - (intptr)Token.Text);
         }
         else if (IsAlphaNumeric(*Tokenizer->At))
         {
@@ -291,7 +312,7 @@ static token GetNextToken(tokenizer *Tokenizer)
                 Tokenizer->At++;
             }
             
-            Token.TextLength = ((u32)Tokenizer->At - (u32)Token.Text);
+            Token.TextLength = (u32)((intptr)Tokenizer->At - (intptr)Token.Text);
             
             if (DoStringsMatch(Token.Text, Token.TextLength, "true") ||
                 DoStringsMatch(Token.Text, Token.TextLength, "false"))
@@ -428,7 +449,7 @@ static expanded_words ExpandOnUnderscore(char *Text, u32 Length) {
         if(*At == '_') {
             NewWord = true;
             if(LastString) {
-                LastString->Length = (At - LastString->E);
+                LastString->Length = (u32)((intptr)At - (intptr)LastString->E);
             }
         }
         
@@ -436,10 +457,74 @@ static expanded_words ExpandOnUnderscore(char *Text, u32 Length) {
     }
     
     if(LastString) {
-        LastString->Length = (At - LastString->E);
+        LastString->Length = (u32)((intptr)At - (intptr)LastString->E);
     }
     
     return Result;
+}
+
+static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char *End, token EnumName, expanded_words Words, char *ArrayTypeAsString) {
+    
+    char cb[2048];
+    char *At = cb;
+    size_t LastSize = 0;
+    if(ArrayTypeAsString) {
+        sprintf_s(cb, sizeof(cb), Begin, ArrayTypeAsString, EnumName.TextLength, EnumName.Text);
+    } else {
+        sprintf_s(cb, sizeof(cb), Begin, EnumName.TextLength, EnumName.Text, EnumName.TextLength, EnumName.Text);
+    }
+    At += StringLength(cb) - LastSize;
+    LastSize = At - cb;
+    
+    for(u32 i = 0; i < Words.Count; ++i) {
+        string Word = Words.Strings[i];
+        char *Comma = ", ";
+        if(i == Words.Count - 1 && !ArrayTypeAsString) {
+            Comma = "";
+        }
+        sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, Comma);
+        At += StringLength(cb) - LastSize;
+        LastSize = At - cb;
+        Assert(LastSize < ArrayCount(cb));
+    }
+    
+    // NOTE(NAME): This is putting the type at the end of the char * array, so we can match strings to get type info!
+    if(ArrayTypeAsString) {
+        sprintf_s(At, sizeof(cb) - (At - cb), "\"%.*s\"", EnumName.TextLength, EnumName.Text);
+        At += StringLength(cb) - LastSize;
+    }
+    //////
+    
+    sprintf_s(At, sizeof(cb) - (At - cb), End);
+    fwrite(cb, StringLength(cb), 1,Tokenizer->FileHandles[ENUM_STRUCTS]);
+    
+}
+
+static void 
+ParseEnumArray(tokenizer *Tokenizer, token Token) {
+    expanded_words Words = {}; 
+    
+    token EnumName = GetNextToken(Tokenizer);
+    Assert(Token.Type == Token_VariableName);
+    
+    Token = GetNextToken(Tokenizer);
+    Assert(Token.Type == Token_OpenBracket);
+    
+    while(Token.Type != Token_SemiColon) {
+        Token = GetNextToken(Tokenizer);
+        
+        if(Token.Type == Token_VariableName) {
+            string *Word = &Words.Strings[Words.Count++];
+            Word->E = Token.Text;
+            Word->Length = Token.TextLength;
+        } else if(Token.Type == Token_ForwardSlash) {
+            EatComments(Tokenizer, Token);
+        } 
+    }
+    
+    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "\"%.*s\"%s", "};\n", EnumName, Words, "char *");
+    
+    ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0);
 }
 
 static void
@@ -525,6 +610,9 @@ static void ParseLine(tokenizer *Tokenizer)
                 
                 
             } break;
+            case Token_ForwardSlash: {
+                EatComments(Tokenizer, Token);
+            } break;
             case Token_BeginParentThesis:
             {
                 
@@ -535,9 +623,10 @@ static void ParseLine(tokenizer *Tokenizer)
             case Token_VariableName:
             {
                 
-                if(DoStringsMatch(Token.Text, Token.TextLength, "GetButtonState") && !LastTokenDefine)
-                {
+                if(DoStringsMatch(Token.Text, Token.TextLength, "GetButtonState") && !LastTokenDefine) {
                     ParseKeyFunction(Tokenizer, Token);
+                }else if(DoStringsMatch(Token.Text, Token.TextLength, "enum") && !LastTokenDefine) {
+                    ParseEnumArray(Tokenizer, Token);
                 }
                 
                 LastTokenDefine = (DoStringsMatch(Token.Text, Token.TextLength, "define"));
@@ -546,7 +635,6 @@ static void ParseLine(tokenizer *Tokenizer)
             case Token_Carrot:
             case Token_Plus:
             case Token_Dash:
-            case Token_ForwardSlash:
             case Token_Astrix:
             case Token_Boolean:
             case Token_VariableType:
@@ -628,8 +716,8 @@ IsFloat(token *Token)
 inline b32
 IsDouble(token *Token)
 {
-    char *At = Token->Text + Token->TextLength;
-    b32 Result = (*At != 'f');
+    char *End = Token->Text + Token->TextLength;
+    b32 Result = (*End != 'f');
     
     u32 Length = Token->TextLength;
     b32 HasDecimal = false;
@@ -869,7 +957,7 @@ GetVariable(token *Token, stack *Stack, primitive *Primitive = 0)
             {       
                 if (Primitive->Type != Result.Type)
                 {
-                    printf("you are tyring to assign type %s to a variable of type %s", Primitive->Type, Result.Type);
+                    printf("you are tyring to assign type %d to a variable of type %d", Primitive->Type, Result.Type);
                 }
                 else
                 {
@@ -1084,49 +1172,36 @@ EVALUTE_GROUP(EvaluateGroup)
 
 static FILE *OpenFileHandle(char *FileName) {
     FILE *FileHandle;
-    fopen_s(&FileHandle, FileName, "w+");
+    fopen_s(&FileHandle, FileName, "w");
     //Assert(FileHandle);
     return FileHandle;
 } 
 
+// NOTE(OLIVER): We were getting the key state for the keyboard using async. This had its downfall in that it didn't have the automatic wait windows puts in if you hold down the key. As well it was cumbersome have types for all the keys and trying to convert them into the character we wanted. Overall the system we were using for all the keys is not what we wanted. Instead we just have an 256 sized array and the asci/utf-8 value automatically maps to it. ahhh... so much easier allowing windows to do the work. Oliver 15/02/17 
+
 int main(int argc, char* argv[])
 {
+    char *FileNames[] = {"calm_win32.cpp", "calm_entity.h", "calm_ui.cpp", "calm_game.h"}; //change this to read all .cpp files
     
-    void *File = ReadFileWithNullTerminator("calm_win32.cpp");
     tokenizer Tokenizer = {};
-    Tokenizer.At = (u8 *)File;
-    Tokenizer.ReachedEndOfStream = false;
     
     Tokenizer.FileHandles[KEY_TYPES_FILE] = OpenFileHandle("meta_keys.h");
     Tokenizer.FileHandles[META_FILE] = OpenFileHandle("calm_meta.h");
     Tokenizer.FileHandles[KEY_FUNCTIONS_FILE] = OpenFileHandle("meta_key_functions.h");
+    Tokenizer.FileHandles[ENUM_STRUCTS] = OpenFileHandle("meta_enum_arrays.h");
     
-    
-    stack Stack = {};
-    InitializeMemoryArena(&Stack.WorkSpace, MegaBytes(2));
-    InitializeMemoryArena(&Stack.VariableMemory, MegaBytes(2), true);
-    
-    /*
-    // NOTE(OLIVER): This was for when we were getting the key state for the keyboard using async. This had its downfall in that it didn't have the automatic wait windows puts in if you hold down the key. As well it was cumbersome have types for all the keys and trying to convert them into the character we wanted. Overall the system we were using for all the keys is not what we wanted. Instead we just have an 256 sized array and the asci/utf-8 value automatically maps to it. ahhh... so much easier allowing windows to do the work. Oliver 15/02/17 
-    
-    char *Str = "struct button_to_char_key {\n    game_button_type Type;\n    char Value;\n};\nbutton_to_char_key ButtonToChar[] = {";
-    
-    fwrite(Str, StringLength(Str), 1, Tokenizer.FileHandles[META_FILE]);
-    
-    //// after we have finished parsing ///////
-    
-    Str = "};";
-    fseek(Tokenizer.FileHandles[META_FILE], -2, SEEK_CUR);
-    fwrite(Str, StringLength(Str), 1, Tokenizer.FileHandles[META_FILE]);
-    
-    */
-    
-    while (Tokenizer.At && !Tokenizer.ReachedEndOfStream)
-    {
-        ParseLine(&Tokenizer);
+    for(u32 i = 0; i < ArrayCount(FileNames); ++i) {
+        void *File = ReadFileWithNullTerminator(FileNames[i]);
+        Tokenizer.At = (u8 *)File;
+        Tokenizer.ReachedEndOfStream = false;
+        
+        while (Tokenizer.At && !Tokenizer.ReachedEndOfStream) {
+            ParseLine(&Tokenizer);
+        }
+        
     }
     
-    
+    // NOTE(OLIVER): Close all files we were writing to.
     for(u32 i = 0; i < ArrayCount(Tokenizer.FileHandles); ++i) {
         fclose(Tokenizer.FileHandles[i]);
     }

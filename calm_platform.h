@@ -46,12 +46,45 @@ typedef s16 int16;
 typedef s32 int32;
 typedef s64 int64;
 
+typedef intptr_t intptr;
+
 typedef b32 bool32;
+
+
+struct v2
+{
+    union
+    {
+        struct
+        {
+            r32 X, Y;
+        };
+        struct
+        {
+            r32 U, V;
+        };
+    };
+};
+
+struct v2i
+{
+    union
+    {
+        struct
+        {
+            s32 X, Y;
+        };
+        struct
+        {
+            s32 U, V;
+        };
+    };
+};
+
+
 
 #define PI32 3.14159265359f
 #define TAU32 6.28318530717958f
-
-#include "calm_intrinsics.h"
 
 #include <float.h>
 #define MAX_U32 0xFFFFFFFF
@@ -79,15 +112,23 @@ typedef b32 bool32;
 
 
 #if INTERNAL_BUILD
-#define Assert(Condition) {if(!(Condition)){ u32 *A = (u32 *)0; *A = 0;}}
+#define Assert(Condition) {if(!(Condition)){ u32 *ATemp_ = (u32 *)0; *ATemp_ = 0;}}
 #else
 #define Assert(Condition)
 #endif
 
 #define InvalidCodePath Assert(!"Invalid Code Path");
 
-#include "calm_math.h"
+#define SOFTWARE_RENDERER 0
 
+#include "calm_intrinsics.h"
+#include "calm_math.h"
+#include "calm_print.cpp"
+
+inline b32 IsWhiteSpace(char Char) {
+    b32 Result = (Char == ' ' || Char == '\n' || Char == '\r');
+    return Result;
+}
 
 struct file_read_result
 {
@@ -104,6 +145,9 @@ struct game_file_handle
 #define PLATFORM_BEGIN_FILE(name) game_file_handle name(char *FileName)
 typedef PLATFORM_BEGIN_FILE(platform_begin_file);
 
+#define PLATFORM_BEGIN_FILE_WRITE(name) game_file_handle name(char *FileName)
+typedef PLATFORM_BEGIN_FILE_WRITE(platform_begin_file_write);
+
 #define PLATFORM_END_FILE(name) void name(game_file_handle Handle)
 typedef PLATFORM_END_FILE(platform_end_file);
 
@@ -112,6 +156,9 @@ typedef PLATFORM_READ_ENTIRE_FILE(platform_read_entire_file);
 
 #define PLATFORM_READ_FILE(name) file_read_result name(game_file_handle Handle, void *Memory, size_t Size, u32 Offset)
 typedef PLATFORM_READ_FILE(platform_read_file);
+
+#define PLATFORM_WRITE_FILE(name) void name(game_file_handle *Handle, void *Memory, size_t Size, u32 Offset)
+typedef PLATFORM_WRITE_FILE(platform_write_file);
 
 #define PLATFORM_FILE_SIZE(name) size_t name(char *FileName)
 typedef PLATFORM_FILE_SIZE(platform_file_size);
@@ -182,6 +229,7 @@ struct bitmap
     u32 Width;
     u32 Height;
     s32 Pitch;
+    u32 Handle;
     v2 AlignPercent;
     
     void *Bits;
@@ -207,6 +255,7 @@ struct game_button
     b32 FrameCount;
 };
 
+struct font;
 struct game_memory
 {
     void *GameStorage;
@@ -217,8 +266,10 @@ struct game_memory
     
     platform_read_entire_file *PlatformReadEntireFile;
     platform_read_file *PlatformReadFile;
+    platform_write_file *PlatformWriteFile;
     platform_file_size *PlatformFileSize;
     platform_begin_file *PlatformBeginFile;
+    platform_begin_file_write *PlatformBeginFileWrite;
     platform_end_file *PlatformEndFile;
     
     r32 MouseX;
@@ -228,7 +279,14 @@ struct game_memory
     
     b32 SoundOn;
     b32 *GameRunningPtr;
+    
+    // TODO(Oliver): Do we want the platform layer to load this? INstead of the game layer filling it in?
+    font *DebugFont;
 };
+
+inline void EndProgram(game_memory *Memory) {
+    *Memory->GameRunningPtr = false;
+}
 
 struct game_sound_buffer
 {
@@ -238,6 +296,120 @@ struct game_sound_buffer
     u32 SamplesPerSecond;
     
 };
+
+//MEMORY ARENAS
+
+
+struct memory_arena
+{
+    void *Base;
+    size_t CurrentSize;
+    size_t TotalSize;
+    
+    u32 TempMemCount;
+};
+
+struct temp_memory
+{
+    memory_arena *Arena;
+    size_t OriginalSize;
+    
+    u32 ID;
+};
+
+#define PushArray(Arena, Type, Size, ...) (Type *)PushSize(Arena, Size*sizeof(Type), __VA_ARGS__)
+#define PushStruct(Arena, Type) (Type *)PushSize(Arena, sizeof(Type))
+
+
+inline void *
+PushSize(memory_arena *Arena, size_t Size, b32 Clear = true)
+{
+    Assert((Arena->CurrentSize + Size) <= Arena->TotalSize);
+    void *Result = (void *)((u8 *)Arena->Base + Arena->CurrentSize);
+    Arena->CurrentSize += Size;
+    
+    if(Clear)
+    {
+        size_t ClearSize = Size;
+        u8 *Memory = (u8 *)Result; 
+        while(ClearSize--)
+        {
+            *Memory++ = 0;
+        }
+    }    
+    return Result;
+    
+}
+
+
+inline void InitializeMemoryArena(memory_arena *Arena, void *Memory, size_t Size) {
+    Arena->Base = (u8 *)Memory;
+    Arena->CurrentSize = 0;
+    Arena->TotalSize = Size;
+} 
+
+inline memory_arena SubMemoryArena(memory_arena *Arena, size_t Size) {
+    memory_arena Result = {};
+    
+    Result.TotalSize = Size;
+    Result.CurrentSize = 0;
+    Result.Base = (u8 *)PushSize(Arena, Result.TotalSize);
+    
+    return Result;
+}
+
+
+inline b32
+DoStringsMatch(char *A, char *B)
+{
+    b32 Result = true;
+    while(*A && *B)
+    {
+        Result &= (*A++ == *B++);
+    }
+    
+    Result &= (!*A && !*B);
+    
+    return Result;
+}
+inline b32 DoStringsMatch(char *NullTerminatedA, char *B, u32 LengthOfB) {
+    b32 Result = true;
+    while(*NullTerminatedA && LengthOfB > 0) {
+        Result &= (*NullTerminatedA++ == *B++);
+        LengthOfB--;
+    }
+    Result &= (LengthOfB == 0) && (!*NullTerminatedA);
+    
+    return Result;
+}
+
+inline temp_memory
+MarkMemory(memory_arena *Arena)
+{
+    temp_memory Result = {};
+    Result.Arena = Arena;
+    Result.OriginalSize = Arena->CurrentSize;
+    Result.ID = Arena->TempMemCount++;
+    
+    return Result;
+    
+}
+
+inline void
+ReleaseMemory(temp_memory *TempMem)
+{
+    TempMem->Arena->CurrentSize = TempMem->OriginalSize;
+    u32 ID = --TempMem->Arena->TempMemCount;
+    Assert(TempMem->ID == ID);
+    
+}
+
+inline void 
+EmptyMemoryArena(memory_arena *Arena) {
+    Assert(Arena->TempMemCount == 0);
+    Arena->CurrentSize = 0;
+}
+
 
 #define CALM_PLATFORM_H
 #endif

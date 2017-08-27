@@ -167,9 +167,10 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
         
         Result.Bits = (void *)((u8 *)BitmapHeader + BitmapHeader->DataOffsetIntoFile);
         
+        
         if(BitmapHeader->BitsPerPixel == 8)
         {
-            //NOTE: not sure what this was for? For some reason we were changing the values
+            //This supports 8 bits per pixel images allowing them to be mapped to a 32bit/pixel space. 
             if(MemoryArena) {
                 u32 *NewBits = PushArray(MemoryArena, u32, Result.Width*Result.Height);
                 u32 Size  = Result.Width*Result.Height*sizeof(u8);
@@ -187,6 +188,16 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
                 }
                 
                 Result.Bits = NewBits;
+            }
+        } else { //pre-multiplied alpha
+            u8 *At = (u8 *)Result.Bits;
+            for(s32 i = 0; i < (s32)(Result.Width*Result.Height); ++i) {
+                r32 Alpha = (r32)(At[3])/255.0f;
+                for(int colorIndex = 0; colorIndex < 3; ++colorIndex) {
+                    //At[colorIndex] = (u8)((r32)At[colorIndex]* Alpha); 
+                }
+                
+                At += 4; 
             }
         }
         
@@ -442,7 +453,10 @@ DrawRectangle(bitmap *Buffer, rect2 Rect, v4 Color01)
              GetMaxCorner(Rect).X, GetMaxCorner(Rect).Y, Color255);
 }
 
-
+inline v2 Scale(transform *Transform, v2 Pos) {
+    v2 Result = Hadamard(Transform->Scale, Pos);
+    return Result;
+}
 
 inline v2 Transform(transform *Transform, v2 Pos) {
     v2 Result = Hadamard(Transform->Scale, Pos);
@@ -482,19 +496,28 @@ void PushRectOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color = V4(0
     Info->Color = Color;
 }
 
-void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
+
+void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpace,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
     
     Header->Type = render_bitmap;
     render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
     
-    Info->Pos = Transform(&Group->Transform, Pos.XY);
-    Info->ZDepth = Pos.Z;
+    
     Info->Bitmap = Bitmap;
     Info->ClipRect = ClipRect;
     Info->Color = Color;
+    r32 WidthToHeightRatio = SafeRatio0((r32)Bitmap->Height, (r32)Bitmap->Width); 
+    r32 HeightInWorldSpace = WidthToHeightRatio*WidthInWorldSpace;
+    Info->Dim = Scale(&Group->Transform, V2(WidthInWorldSpace, HeightInWorldSpace));
+    Info->Pos = Transform(&Group->Transform, Pos.XY) - Hadamard(Bitmap->AlignPercent, Info->Dim);
+    Info->ZDepth = Pos.Z;
 }
 
+void PushBitmapScale(render_group *Group, v3 Pos, bitmap *Bitmap, r32 Scale,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
+    
+    PushBitmap(Group, Pos, Bitmap, Scale*Bitmap->Width, ClipRect, Color);
+}
 void PushRect(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_rect) + sizeof(render_element_header));
     
@@ -521,7 +544,7 @@ void RenderGroupToOutput(render_group *Group) {
     u8 *At = Base;
     
     rect2 BufferRect = Rect2(0, 0, Group->ScreenDim.X, Group->ScreenDim.Y);
-    while((At - Base) < Group->Arena.CurrentSize) {
+    while((s32)(At - Base) < Group->Arena.CurrentSize) {
         render_element_header *Header = (render_element_header *)At;
         switch(Header->Type) {
             case render_clear: {
@@ -534,7 +557,7 @@ void RenderGroupToOutput(render_group *Group) {
             case render_bitmap: {
                 render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
                 
-                DrawBitmap(Group->Buffer, Info->Bitmap, Info->Pos.X, Info->Pos.Y, Info->ClipRect, Info->Color);
+                DrawBitmap(Group->Buffer, Info->Bitmap, (s32)Info->Pos.X, (s32)Info->Pos.Y, Info->ClipRect, Info->Color);
                 
                 At += sizeof(render_element_header) + sizeof(render_element_bitmap);
             } break;

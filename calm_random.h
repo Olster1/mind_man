@@ -572,15 +572,15 @@ RandomBetween(random_series *Series, r32 Min, r32 Max)
 {
     r32 Result = Lerp(Min, RandomLateral(Series), Max);
     return Result;
-
+    
 }
 
-inline u32
+inline s32
 RandomBetween(random_series *Series, s32 Min, s32 Max)
 {
-    u32 Result = Min + (NextRandomU32(Series) % ((Max + 1) - Min));
+    s32 Result = Min + (NextRandomU32(Series) % ((Max + 1) - Min));
     return Result;
-
+    
 }
 
 

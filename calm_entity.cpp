@@ -5,6 +5,15 @@ struct array_v2
     u32 Count;
 };
 
+inline b32 AddToPath(path_nodes *Path, v2 NewMove) {
+    b32 Result = false;
+    if(Path->Count < ArrayCount(Path->Points)) {
+        Result = true;
+        Path->Points[Path->Count++] = NewMove;
+    }
+    return Result;
+}
+
 inline b32
 IsRemoved(u32 Index, u32 RemoveBitField)
 {
@@ -392,9 +401,26 @@ UpdateEntityPositionWithImpulse(game_state *GameState, entity *Entity, r32 dt, v
     
 }
 
+inline void AddChunkType(entity *Entity, chunk_type Type) {
+    Assert(Entity->ChunkTypeCount < ArrayCount(Entity->ValidChunkTypes));
+    Entity->ValidChunkTypes[Entity->ChunkTypeCount++] = Type;
+}
+
+inline void AddChunkTypeToChunkChanger(entity *Entity, chunk_type Type) {
+    Assert(Entity->Type == Entity_Chunk_Changer);
+    Assert(Entity->ChunkListCount < ArrayCount(Entity->ChunkList));
+    Entity->ChunkList[Entity->ChunkListCount++] = Type;
+}
+
+inline void EndPath(entity *Entity) {
+    if(Entity->Path.Count > 0) {
+        Assert(Entity->Path.Count > Entity->VectorIndexAt);
+        Entity->Path.Count = Entity->VectorIndexAt;
+    }
+}
+
 inline entity *
-InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsInteractable = false)
-{
+InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsInteractable = false) {
     Assert(GameState->EntityCount < ArrayCount(GameState->Entities));
     
     u32 EntityIndex = GameState->EntityCount++;
@@ -402,7 +428,7 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsIntera
     
     *Entity = {};
     Entity->Velocity = {};
-    Entity->MovePeriod = 0.5f;
+    Entity->MovePeriod = 0.3f;
     Entity->Pos = Pos;
     //Entity->StartPos = Entity->TargetPos;
     Entity->Dim = Dim;
@@ -413,8 +439,101 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsIntera
     Entity->Type = Type;
     Entity->IsInteractable = IsInteractable;
     Entity->TriggerAction = false;
+    Entity->LifeSpan = 10.0f;
+    Entity->ChunkTimer = {};
+    Entity->ChunkTimer.Period = 1.0f;
+    
+    //Entity->LastMoves;;
+    Entity->LastMoveAt = 0;
+    Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion
+    
+#if INTERNAL_BUILD
+    ui_element_settings Set = {};
+    Set.ValueLinkedTo = Entity;
+    
+    AddUIElement(GameState->UIState, UI_Entity, Set);
+#endif
     
     return Entity;
+}
+
+internal inline b32 LookingForPosition(entity *Entity, v2i Pos) {
+    b32 Result = false;
+    if(Entity->Path.Count > 0) {
+        if(V2i(Pos) == Entity->Path.Points[Entity->Path.Count - 1]) {
+            Result = true;
+        }
+    }
+    return Result;
+}
+
+internal inline void MarkAsDeprecated(ui_state *UIState, ui_element *Elm) {
+    Elm->IsValid = false;
+    Assert(UIState->FreeElmCount < ArrayCount(UIState->ElementsFree));
+    UIState->ElementsFree[UIState->FreeElmCount++] = Elm->Index;
+    UIState->ElmCount--;
+}
+
+internal inline b32  
+RemoveEntityUIElement(ui_state *UIState, entity *Entity) {
+    Assert(UIState->ElmCount < ArrayCount(UIState->Elements));Assert(UIState->ElmCount >= 0);
+    
+    b32 WasRemoved = false;
+    
+    if(UIState->ElmCount > 0) {
+        fori_count(UIState->ElmCount) {
+            ui_element *Elm = UIState->Elements + Index;
+            entity *EntityPtr = (entity *)Elm->Set.ValueLinkedTo;
+            if(Elm->Type == UI_Entity && EntityPtr->Index == Entity->Index) {
+                MarkAsDeprecated(UIState, Elm);
+                MarkAsDeprecated(UIState, Elm->Parent);
+                WasRemoved = true;
+                break;
+            }
+        }
+    }
+    
+    //Assert(WasRemoved);
+    return WasRemoved;
+    
+}
+
+internal inline b32 RemoveEntity(game_state *GameState, u32 EntityIndex) {
+    Assert(GameState->EntityCount < ArrayCount(GameState->Entities));Assert(GameState->EntityCount >= 0);
+    
+    b32 WasRemoved = false;
+    
+    if(GameState->EntityCount > 0) {
+        
+        entity *EntityA = &GameState->Entities[--GameState->EntityCount];
+        entity *EntityB = &GameState->Entities[EntityIndex];
+        *EntityB = *EntityA;
+        // Init Entity clears it as well. So probably don't need. 
+        EntityA = {}; 
+        //
+        
+#if INTERNAL_BUILD
+        RemoveEntityUIElement(GameState->UIState, EntityB);
+#endif
+        
+        WasRemoved = true;
+        
+    }
+    
+    return WasRemoved;
+    
+}
+
+inline b32 ContainsChunkType(entity *Entity, chunk_type ChunkType) {
+    
+    b32 Result = false;
+    fori_count(Entity->ChunkTypeCount) {
+        if(Entity->ValidChunkTypes[Index] == ChunkType) {
+            Result = true;
+            break;
+        }
+    }
+    return Result;
 }
 
 internal void

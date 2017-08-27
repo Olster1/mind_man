@@ -7,91 +7,29 @@
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
 
+////////////////Gameplay defines/////////
 #define END_WITH_OFFSET 0
 #define MOVE_DIAGONAL 0
-
-struct memory_arena
-{
-    void *Base;
-    size_t CurrentSize;
-    size_t TotalSize;
-    
-    u32 TempMemCount;
-};
-
-struct temp_memory
-{
-    memory_arena *Arena;
-    size_t OriginalSize;
-    
-    u32 ID;
-};
-
-#define PushArray(Arena, Type, Size, ...) (Type *)PushSize(Arena, Size*sizeof(Type), __VA_ARGS__)
-#define PushStruct(Arena, Type) (Type *)PushSize(Arena, sizeof(Type))
-
-
-inline void *
-PushSize(memory_arena *Arena, size_t Size, b32 Clear = true)
-{
-    Assert((Arena->CurrentSize + Size) <= Arena->TotalSize);
-    void *Result = (void *)((u8 *)Arena->Base + Arena->CurrentSize);
-    Arena->CurrentSize += Size;
-    
-    if(Clear)
-    {
-        size_t ClearSize = Size;
-        u8 *Memory = (u8 *)Result; 
-        while(ClearSize--)
-        {
-            *Memory++ = 0;
-        }
-    }    
-    return Result;
-    
-}
-
-
-inline void InitializeMemoryArena(memory_arena *Arena, void *Memory, size_t Size) {
-    Arena->Base = (u8 *)Memory;
-    Arena->CurrentSize = 0;
-    Arena->TotalSize = Size;
-} 
-
-inline memory_arena SubMemoryArena(memory_arena *Arena, size_t Size) {
-    memory_arena Result = {};
-    
-    Result.TotalSize = Size;
-    Result.CurrentSize = 0;
-    Result.Base = (u8 *)PushSize(Arena, Result.TotalSize);
-    
-    return Result;
-}
+#define MOVE_VIA_MOUSE 0
+#define PLAYER_MOVE_ACTION IsDown
+#define DEFINE_MOVE_ACTION WasPressed
+#define DRAW_PLAYER_PATH 0
+#define CREATE_PHILOSOPHER 1
+#define UPDATE_CAMERA_POS 1
+/////////////////////////////////////////
 
 
 #define CopyArray(Source, Dest, Type, Count) MemoryCopy(Source, Dest, sizeof(Type)*Count);
 
-inline b32
-DoStringsMatch(char *A, char *B)
-{
-    b32 Result = true;
-    while(*A && *B)
-    {
-        Result &= (*A++ == *B++);
+//Can we make this into a more generalised funciton? Maybe with meta-programming?
+inline b32 InArray(u32 *Array, u32 ArrayCount, u32 Value) {
+    b32 Result = false;
+    forN(ArrayCount) {
+        if(Array[ArrayCountIndex] == Value) {
+            Result = true;
+            break;
+        }
     }
-    
-    Result &= (!*A && !*B);
-    
-    return Result;
-}
-inline b32 DoStringsMatch(char *NullTerminatedA, char *B, u32 LengthOfB) {
-    b32 Result = true;
-    while(*NullTerminatedA && LengthOfB > 0) {
-        Result &= (*NullTerminatedA++ == *B++);
-        LengthOfB--;
-    }
-    Result &= (LengthOfB == 0) && (!*NullTerminatedA);
-    
     return Result;
 }
 
@@ -107,27 +45,6 @@ internal u32 StringLength(char *A) {
     return Result;
 }
 
-inline temp_memory
-MarkMemory(memory_arena *Arena)
-{
-    temp_memory Result = {};
-    Result.Arena = Arena;
-    Result.OriginalSize = Arena->CurrentSize;
-    Result.ID = Arena->TempMemCount++;
-    
-    return Result;
-    
-}
-
-inline void
-ReleaseMemory(temp_memory *TempMem)
-{
-    TempMem->Arena->CurrentSize = TempMem->OriginalSize;
-    u32 ID = --TempMem->Arena->TempMemCount;
-    Assert(TempMem->ID == ID);
-    
-}
-
 #define MoveToList(LinkPtr, FreeList, type) type *Next = (*LinkPtr)->Next; (*LinkPtr)->Next = FreeList; FreeList = *LinkPtr; *LinkPtr = Next;
 
 struct timer {
@@ -135,26 +52,44 @@ struct timer {
     r32 Period;
 };
 
-inline void UpdateTimer(timer *Timer, r32 dt, r32 ResetValue = 0.0f) {
+inline b32 UpdateTimer(timer *Timer, r32 dt, r32 ResetValue = 0.0f) {
     Timer->Value += dt;
+    b32 WasReset = false;
     if((Timer->Value / Timer->Period) >= 1.0f) {
         Timer->Value = ResetValue;
+        WasReset = true;
     }
     Assert((Timer->Value/Timer->Period) <= 1.0f);
+    return WasReset;
 }
 
+inline r32 CanonicalValue(timer *Timer) {
+    r32 Result = Timer->Value/Timer->Period;
+    return Result;
+}
+
+enum chunk_type {
+    ChunkNull, 
+    ChunkLight,
+    ChunkDark,
+    ChunkBlock,
+    ChunkMain,
+    
+    ChunkTypeCount
+};
+
 #include "calm_bucket.cpp"
-#include "calm_math.h"
 #include "calm_random.h"
-#include "calm_render.h"
-#include "calm_font.h"
 #include "calm_console.h"
-#include "calm_sound.h"
+#include "handmade_audio.h"
 #include "calm_entity.h"
+#include "calm_menu.h"
 
 
 enum game_mode {
     PLAY_MODE,
+    GAMEOVER_MODE,
+    WIN_MODE,
     MENU_MODE,
 };
 
@@ -175,16 +110,6 @@ struct animation {
     r32 Qualities[ANIMATE_QUALITY_COUNT];
 };
 
-enum chunk_type {
-    chunk_null,
-    
-    chunk_grass,
-    chunk_fire,
-    chunk_water,
-    
-    chunk_type_count
-};
-
 static r32 WorldChunkInMeters = 1.0f;
 
 struct world_chunk {
@@ -192,43 +117,42 @@ struct world_chunk {
     s32 Y;
     
     chunk_type Type;
+    chunk_type MainType;
     
     world_chunk *Next;
 };
 
 #define WORLD_CHUNK_HASH_SIZE 4096
 
+struct ui_state;
 struct game_state
 {
     memory_arena MemoryArena;
     memory_arena PerFrameArena;
     memory_arena SubArena;
     memory_arena ScratchPad;
+    memory_arena RenderArena;
     
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;
     
+    //These should never move i.e. we should never get a null pointer. Maybe we could change all entity pointers to an ID and we look up that ID instead of getting dangling pointer...//
     entity *Camera;
+    entity *Player;
     
     loaded_sound BackgroundMusic;
+    loaded_sound FootstepsSound[32];
     
     search_cell *SearchCellFreeList;
     search_cell SearchCellSentinel;
-    
-    entity *Player;
     
     //TODO: Can we get rid of this using z-indexes!
     b32 RenderConsole;
     //
     
     game_mode GameMode;
-    s32 MenuIndex;
     
     world_chunk *Chunks[WORLD_CHUNK_HASH_SIZE]; 
-    
-    entity *InteractingWith;
-    entity *HotEntity;
-    
     
     u32 EntityCount;
     entity Entities[64];
@@ -244,13 +168,20 @@ struct game_state
     r32 FramePeriod;
     r32 FrameTime;
     
-    r32 MenuTime;
-    r32 MenuPeriod;
+    menu PauseMenu;
+    menu GameOverMenu;
     
     u32 LanternAnimationCount;
     animation LanternManAnimations[16];
     
     random_series GeneralEntropy;
+    
+    //
+    b32 PlayerIsSettingPath;
+    path_nodes PathToSet;
+    //
+    
+    ui_state *UIState;
     
     b32 IsInitialized;
     

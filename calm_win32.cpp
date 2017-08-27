@@ -5,21 +5,38 @@
    $Creator: Oliver Marsh $
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
+
+#define WRITE_FONT_FILE 0
+#define SWAP_BUFFER_INTERVAL 2
+
 #include <windows.h>
 #include <stdio.h>
+
 #include "calm_platform.h"
 #include "calm_win32.h"
-#include "calm_game.cpp"
+#include "calm_render.h"
+#include "calm_font.h"
+#if WRITE_FONT_FILE
 #include "write_font_file_win32.h"
+#endif
 #include "dsound.h"
-
-#define WRITE_FONT_FILE 1
+#include <gl/gl.h>
 
 global_variable b32 GlobalRunning;
 
 global_variable offscreen_buffer GlobalOffscreenBuffer;
 global_variable LARGE_INTEGER GlobalTimeFrequencyDatum;
 global_variable LPDIRECTSOUNDBUFFER GlobalSoundBuffer;
+
+global_variable GLuint GlobalOpenGlDefaultInternalTextureFormat;
+
+#include "calm_opengl.cpp"
+#include "calm_game.cpp"
+
+typedef BOOL WINAPI wgl_swap_interval_ext(int interval);
+global_variable wgl_swap_interval_ext *wglSwapInterval;
+
+typedef  HGLRC wgl_Create_Context_Attribs_ARB(HDC hDC, HGLRC hShareContext, const int *attribList);
 
 #define DIRECT_SOUND_CREATE(name) HRESULT name(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN  pUnkOuter)
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
@@ -171,12 +188,37 @@ PLATFORM_BEGIN_FILE(Win32BeginFile)
                                    FILE_ATTRIBUTE_NORMAL,
                                    0);
     
-    if(FileHandle)
+    if(FileHandle != INVALID_HANDLE_VALUE)
     {
         Result.Data = FileHandle;
     }
     else
     {
+        Result.HasErrors = true;
+    }
+    
+    return Result;
+}
+
+PLATFORM_BEGIN_FILE_WRITE(Win32BeginFileWrite)
+{
+    game_file_handle Result = {};
+    
+    HANDLE FileHandle = CreateFile(FileName,
+                                   GENERIC_WRITE,
+                                   FILE_SHARE_READ,
+                                   0,
+                                   CREATE_ALWAYS,
+                                   FILE_ATTRIBUTE_NORMAL,
+                                   0);
+    
+    if(FileHandle != INVALID_HANDLE_VALUE)
+    {
+        Result.Data = FileHandle;
+    }
+    else
+    {
+        DWORD Error = GetLastError();
         Result.HasErrors = true;
     }
     
@@ -190,6 +232,32 @@ PLATFORM_END_FILE(Win32EndFile)
     {
         CloseHandle(FileHandle);
     }
+}
+
+PLATFORM_WRITE_FILE(Win32WriteFile)
+{
+    Handle->HasErrors = false;
+    HANDLE FileHandle = (HANDLE)Handle->Data;
+    if(!Handle->HasErrors)
+    {
+        if(FileHandle)
+        {
+            if(SetFilePointer(FileHandle, Offset, 0, FILE_BEGIN) !=  INVALID_SET_FILE_POINTER)
+            {
+                DWORD BytesWritten;
+                if(WriteFile(FileHandle, Memory, (DWORD)Size, &BytesWritten, 0))
+                {
+                    if(BytesWritten == Size) {
+                        Handle->HasErrors = false;
+                    }
+                }
+                else
+                {
+                    Assert(!"Read file did not succeed");
+                }
+            }
+        }
+    }    
 }
 
 PLATFORM_READ_FILE(Win32ReadFile)
@@ -277,6 +345,76 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
     return Result;
 }
 
+internal void
+Win32InitOpenGL(HWND Window) {
+    HDC WindowDC = GetDC(Window);
+    
+    //NOTE: Pixel format we would like.
+    PIXELFORMATDESCRIPTOR DesiredPixelFormat = {};
+    DesiredPixelFormat.nSize = sizeof(DesiredPixelFormat);
+    DesiredPixelFormat.iPixelType = PFD_TYPE_RGBA;
+    DesiredPixelFormat.nVersion = 1;
+    DesiredPixelFormat.dwFlags = PFD_SUPPORT_OPENGL|PFD_DRAW_TO_WINDOW|PFD_DOUBLEBUFFER;
+    DesiredPixelFormat.cColorBits = 32;
+    DesiredPixelFormat.cAlphaBits = 8;
+    DesiredPixelFormat.iLayerType = PFD_MAIN_PLANE;
+    
+    //
+    //NOTE(Ollie): We have to do this because the graphics card only has certain 
+    //operations it can perfrom, so we have to negoitate with it and find a 
+    //format that it supports
+    //
+    int SuggestedPixelFormatIndex = ChoosePixelFormat(WindowDC, &DesiredPixelFormat);
+    PIXELFORMATDESCRIPTOR SuggestedPixelFormat;
+    DescribePixelFormat(WindowDC, SuggestedPixelFormatIndex, sizeof(SuggestedPixelFormat), &SuggestedPixelFormat);
+    SetPixelFormat(WindowDC, SuggestedPixelFormatIndex, &SuggestedPixelFormat);
+    HGLRC GLRenderContext = wglCreateContext(WindowDC); //To do multi-threaded texture downloads we want to allow for multi threads to share the same context and therefore have a knowledge of which textures are being used by each other. 
+    if(wglMakeCurrent(WindowDC, GLRenderContext)) {
+        
+        b32 IsModernContext = false;
+        wgl_Create_Context_Attribs_ARB *wglCreateContextAttribsARB =(wgl_Create_Context_Attribs_ARB *)wglGetProcAddress("wglCreateContextAttribsARB");
+        
+        //Hey Are you a modern version of openGl, if so can you give me a modern context
+        if(wglCreateContextAttribsARB) {
+            // NOTE(OLIVER): Modern version of OpenlGl supported
+            int Attribs[] = {
+                WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+                WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+                WGL_CONTEXT_FLAGS_ARB, 0 // NOTE(OLIVER): Enable For testing WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB
+#if HANDMADE_INTERNAL
+                |WGL_CONTEXT_DEBUG_BIT_ARB
+#endif
+                ,
+                WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+                0
+            };
+            HGLRC ShareContext = 0;
+            HGLRC ModernContext = wglCreateContextAttribsARB(WindowDC, ShareContext, Attribs);
+            if(ModernContext) {
+                if(wglMakeCurrent(WindowDC, ModernContext)) {
+                    wglDeleteContext(GLRenderContext);
+                    GLRenderContext = ModernContext;
+                    IsModernContext = true;
+                }
+                
+            }
+        } else{
+            // NOTE(OLIVER): This is an antiquated version of OpenGl i.e. below version 3?
+            //Don't have to do anything. 
+        }
+        
+        OpenGlInit(IsModernContext);
+        
+        wglSwapInterval =(wgl_swap_interval_ext *)wglGetProcAddress("wglSwapIntervalEXT");
+        if(wglSwapInterval) {
+            wglSwapInterval(SWAP_BUFFER_INTERVAL); //1 frame we hold before overriding -> I think this is the backup scheme. When the CPU gets back to this position it will have to wait till it is finished rendering -> I think this is V-sync
+        }
+    } else {
+        InvalidCodePath
+    }
+    ReleaseDC(Window, WindowDC);
+    
+}
 
 internal void 
 Win32WriteAudioSamplesToBuffer(LPDIRECTSOUNDBUFFER SecondaryBuffer, s16 *SamplesToWrite, u32 WriteCursor, u32 BytesToWrite, sound_info *SoundInfo)
@@ -535,9 +673,15 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
     
     if(RegisterClass(&WndClassInfo))
     {
-        
+#define FULL_SCREEN 0
+#if FULL_SCREEN
+        u32 Width = 1920;
+        u32 Height = 1080;
+#else 
         u32 Width = 960;
         u32 Height = 540;
+#endif
+        
         
         HWND WindowHandle = CreateWindowExA(0,
                                             WndClassInfo.lpszClassName,
@@ -554,7 +698,13 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
         
         if(WindowHandle)
         {
+#if FULL_SCREEN
+            
+            SetWindowPos(WindowHandle, HWND_TOPMOST, 0,  0, GetSystemMetrics(SM_CXSCREEN ), GetSystemMetrics( SM_CYSCREEN ), 0L );
+#endif
             GlobalRunning = true;
+            
+            Win32InitOpenGL(WindowHandle);
             
             SYSTEM_INFO SystemInfo;
             GetSystemInfo(&SystemInfo);
@@ -598,8 +748,11 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             
             timeBeginPeriod(1);
             
+            ///////Render Groups we pass to the game layer/////
+            render_group RenderGroup;
+            render_group OrthoRenderGroup;
             
-            u32 TargetFramesPerSecond = 30;
+            u32 TargetFramesPerSecond = 60 / SWAP_BUFFER_INTERVAL;
             r32 TargetTimePerFrameInSeconds = 1.0f / (r32)TargetFramesPerSecond;
             
             if(GlobalOffscreenBuffer.Bits)
@@ -640,7 +793,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             SoundInfo.BytesPerSampleForBothChannels = (SoundInfo.NumberOfChannels*SoundInfo.BitsPerSample) / 8;
             SoundInfo.SamplesPerSec = 48000;
             SoundInfo.BytesPerSec = SoundInfo.BytesPerSampleForBothChannels*SoundInfo.SamplesPerSec;
-            SoundInfo.BufferLengthInBytes = 2*SoundInfo.BytesPerSec; //NOTE(ollie): two seconds worth of audio
+            SoundInfo.BufferLengthInBytes = (u32)(2*SoundInfo.BytesPerSec); //NOTE(ollie): two seconds worth of audio
             //TODO(ollie): Does it matter if this is truncated? or should it be rounded?
             SoundInfo.BytesPerFrame = (u32)(TargetTimePerFrameInSeconds*SoundInfo.BytesPerSec);
             SoundInfo.BufferByteAt = 0;
@@ -668,21 +821,31 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             
             GameMemory.PlatformReadEntireFile = Win32ReadEntireFile;
             GameMemory.PlatformReadFile = Win32ReadFile;
+            GameMemory.PlatformWriteFile = Win32WriteFile;
             GameMemory.PlatformFileSize = Win32FileSize;
             GameMemory.PlatformBeginFile = Win32BeginFile;
+            GameMemory.PlatformBeginFileWrite = Win32BeginFileWrite;
             GameMemory.PlatformEndFile = Win32EndFile;
             GameMemory.GameRunningPtr = &GlobalRunning;
-            GameMemory.SoundOn = false;
+            GameMemory.SoundOn = true;
             
 #if WRITE_FONT_FILE
             Win32WriteFontFile();
 #endif
             s64 LastCounter = Win32GetTimeCount();
             
+            s32 PlayCursorIndex = 0;
+            s32 WriteCursorIndex = 0;
+            s32 CursorAtIndex = 0;
+            s32 FrameFlipAtIndex = 0;
+            
+            s32 WriteCursors[512] = {};
+            s32 PlayCursors[512] = {};
+            s32 CursorsAt[512] = {};
+            s32 FrameFlipAt[512] = {};
+            s32 ViewIndex = 0;
             
             b32 FirstTimeInGameLoop = true;
-            u32 LoopCount = 0;
-            
             
             while(GlobalRunning)
             {
@@ -743,11 +906,12 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 GameMemory.MouseX = (r32)CursorPos.x;
                 GameMemory.MouseY = FrameBufferBitmap.Height - (r32)CursorPos.y;
                 
-                GameUpdateAndRender(&FrameBufferBitmap, &GameMemory, TargetTimePerFrameInSeconds);
+                GameUpdateAndRender(&FrameBufferBitmap, &GameMemory, &OrthoRenderGroup, &RenderGroup,  TargetTimePerFrameInSeconds);
                 
                 ///////////////NOTE(ollie): Sound Programming ///////////////////////////
                 if(GlobalSoundBuffer)
                 {
+#if 1
                     s32 BytesToWrite = 0;
                     
                     DWORD PlayCursorAt;
@@ -807,72 +971,165 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                             BytesToWrite = SoundInfo.BytesPerFrame + BytesPastFrameFlip + Error;
                         }
                         
+#else 
+                        DWORD BytesToWrite = 0;
+                        u32 SafetyMarginBytes = (u32)(0.5f*SoundInfo.BytesPerFrame);
+                        
+                        real32 SecondsSinceFlip = Win32GetSecondsElapsed(Win32GetTimeCount(),
+                                                                         LastCounter);
+                        DWORD PlayCursor;
+                        DWORD WriteCursor;
+                        if(GlobalSoundBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor) == DS_OK)
+                        {
+                            if(FirstTimeInGameLoop)
+                            {
+                                SoundInfo.BufferByteAt = WriteCursor;
+                            }
+                            
+                            DWORD TargetCursor;
+                            DWORD ByteToLock = (SoundInfo.BufferByteAt) % SoundInfo.BufferLengthInBytes;
+                            
+                            real32 PercentofFrameTime = (TargetTimePerFrameInSeconds - SecondsSinceFlip) /
+                                TargetTimePerFrameInSeconds;
+                            DWORD ExpectedFrameBoundaryByte = PlayCursor + (uint32)((real32)SoundInfo.BytesPerFrame * (real32)PercentofFrameTime);
+                            
+                            DWORD SafeWriteCursor = WriteCursor;
+                            if(WriteCursor < PlayCursor)
+                            {
+                                SafeWriteCursor += SoundInfo.BufferLengthInBytes;
+                            }
+                            SafeWriteCursor += SafetyMarginBytes;
+                            bool32 AudioCardIsLowLatentcy = true;
+                            AudioCardIsLowLatentcy = (SafeWriteCursor < ExpectedFrameBoundaryByte);
+                            
+                            if(AudioCardIsLowLatentcy)
+                            {
+                                TargetCursor = (ExpectedFrameBoundaryByte + SoundInfo.BytesPerFrame);
+                            }
+                            else
+                            {
+                                TargetCursor = (WriteCursor + SoundInfo.BytesPerFrame +
+                                                SafetyMarginBytes);                            
+                            }
+                            
+                            TargetCursor %= SoundInfo.BufferLengthInBytes;
+                            
+                            if(ByteToLock > TargetCursor){
+                                
+                                BytesToWrite = (SoundInfo.BufferLengthInBytes - ByteToLock) + TargetCursor; 
+                            }
+                            else {
+                                BytesToWrite = TargetCursor - ByteToLock;
+                            }
+                            
+#endif
+                        }
+                        else
+                        {
+                            Assert(!"Didn't retrieve play cursor info");
+                        }
+                        
+                        //Assert(BytesToWrite >= 0);
+                        //TODO(): Why does Bytes to write go negative
+                        if(BytesToWrite < 0)
+                        {
+                            BytesToWrite = 0;
+                        }
+                        
+                        if(WasPressed(GameMemory.GameButtons[Button_Left])) {
+                            ViewIndex++;
+                        }
+                        
+                        r32 PlayCursorX = (r32)(PlayCursors[ViewIndex]) / (r32)SoundInfo.BufferLengthInBytes * (r32)Width;
+                        
+                        PushRect(&OrthoRenderGroup, Rect2MinMax(V2(PlayCursorX, 0), V2(PlayCursorX + 5, 100)), 1, V4(1, 1, 1, 1));
+                        
+                        PlayCursorX = (r32)(FrameFlipAt[ViewIndex]) / (r32)SoundInfo.BufferLengthInBytes * (r32)Width;
+                        
+                        PushRect(&OrthoRenderGroup, Rect2MinMax(V2(PlayCursorX, 0), V2(PlayCursorX + 5, 100)), 1, V4(0, 1, 1, 1));
+                        
+                        
+                        r32 WriteCursorX = (r32)(WriteCursors[ViewIndex]) / (r32)SoundInfo.BufferLengthInBytes * (r32)Width;
+                        
+                        PushRect(&OrthoRenderGroup, Rect2MinMax(V2(WriteCursorX, 0), V2(WriteCursorX + 5, 100)), 1, V4(1, 1, 0, 1));
+                        
+                        PlayCursorX = (r32)(CursorsAt[ViewIndex]) / (r32)SoundInfo.BufferLengthInBytes * (r32)Width;
+                        
+                        PushRect(&OrthoRenderGroup, Rect2MinMax(V2(PlayCursorX, 0), V2(PlayCursorX + 5, 100)), 1, V4(1, 0, 0, 1));
+                        
+                        
+                        game_sound_buffer GameSoundBuffer = {};
+                        GameSoundBuffer.Samples = AudioSamples;
+                        GameSoundBuffer.SamplesToWrite = BytesToWrite / SoundInfo.BytesPerSampleForBothChannels;
+                        GameSoundBuffer.SamplesPerSecond = SoundInfo.SamplesPerSec;
+                        GameSoundBuffer.ChannelCount = SoundInfo.NumberOfChannels;
+                        
+                        
+                        GameWriteAudioSamples(&GameMemory, &GameSoundBuffer);
+                        Win32WriteAudioSamplesToBuffer(GlobalSoundBuffer, AudioSamples,
+                                                       SoundInfo.BufferByteAt,
+                                                       BytesToWrite, &SoundInfo);
+                        SoundInfo.BufferByteAt += BytesToWrite;
+                        SoundInfo.BufferByteAt %= SoundInfo.BufferLengthInBytes;
+                        
                     }
-                    else
+                    
+                    /////////////////////////////////////////////////////////////////////////////
+#define SLEEP 1
+                    r32 SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
+#if SLEEP
+                    
+                    
+                    if(SecondsElapsed < TargetTimePerFrameInSeconds)
                     {
-                        Assert(!"Didn't retrieve play cursor info");
+                        Sleep((u32)(1000.0f*(TargetTimePerFrameInSeconds - SecondsElapsed)));
+                        
+                        SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
+                        while(SecondsElapsed < TargetTimePerFrameInSeconds)
+                        {
+                            SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
+                        }
+                        
                     }
-                    
-                    //Assert(BytesToWrite >= 0);
-                    //TODO(): Why does Bytes to write go negative
-                    if(BytesToWrite < 0)
-                    {
-                        BytesToWrite = 0;
-                    }
-                    
-                    
-                    game_sound_buffer GameSoundBuffer = {};
-                    GameSoundBuffer.Samples = AudioSamples;
-                    GameSoundBuffer.SamplesToWrite = BytesToWrite / SoundInfo.BytesPerSampleForBothChannels;
-                    GameSoundBuffer.SamplesPerSecond = SoundInfo.SamplesPerSec;
-                    GameSoundBuffer.ChannelCount = SoundInfo.NumberOfChannels;
-                    
-                    
-                    GameWriteAudioSamples(&GameMemory, &GameSoundBuffer);
-                    Win32WriteAudioSamplesToBuffer(GlobalSoundBuffer, AudioSamples,
-                                                   SoundInfo.BufferByteAt,
-                                                   BytesToWrite, &SoundInfo);
-                    SoundInfo.BufferByteAt += BytesToWrite;
-                    SoundInfo.BufferByteAt %= SoundInfo.BufferLengthInBytes;
-                    
-                }
-                
-                /////////////////////////////////////////////////////////////////////////////
-                
-                r32 SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
-                
-                if(SecondsElapsed < TargetTimePerFrameInSeconds)
-                {
-                    Sleep((u32)(1000.0f*(TargetTimePerFrameInSeconds - SecondsElapsed)));
                     
                     SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
-                    while(SecondsElapsed < TargetTimePerFrameInSeconds)
-                    {
-                        SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
-                    }
-                    
-                }
-                
-                SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
-                
-                LastCounter = Win32GetTimeCount();
-                
-#if 0
-                char TextBuffer[256] = {};
-                sprintf_s(TextBuffer, sizeof(TextBuffer), "%f\n", SecondsElapsed);
-                OutputDebugString(TextBuffer);
 #endif
-                
-                win32_dimension WindowDim = Win32GetClientDimension(WindowHandle);
-                
-                HDC WindowDC = GetDC(WindowHandle);
-                Win32BltBitmapToScreen(WindowDC, WindowDim.X, WindowDim.Y);
-                ReleaseDC(WindowHandle, WindowDC);
-                
-                FirstTimeInGameLoop = false;
-                LoopCount++;
+                    
+                    win32_dimension WindowDim = Win32GetClientDimension(WindowHandle);
+                    
+                    HDC WindowDC = GetDC(WindowHandle);
+#if SOFTWARE_RENDERER
+                    Win32BltBitmapToScreen(WindowDC, WindowDim.X, WindowDim.Y);
+#else
+                    
+                    
+#define DRAW_FRAME_RATE 1
+#if DRAW_FRAME_RATE
+                    SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
+                    
+                    char TextBuffer[256] = {};
+                    Print(TextBuffer, "%f\n", SecondsElapsed);
+                    
+                    if(GameMemory.DebugFont) {
+                        draw_text_options Opt = InitDrawOptions();
+                        Opt.AdvanceYAtStart = true;
+                        Opt.LineAdvanceModifier = 1;
+                        TextToOutput(&OrthoRenderGroup, GameMemory.DebugFont, TextBuffer, 0, 0, Rect2(0, 0, (r32)Width, (r32)Height), V4(1, 1, 1, 1), &Opt);
+                    }
+#endif
+                    OpenGlRenderToOutput(&RenderGroup, true);
+                    OpenGlRenderToOutput(&OrthoRenderGroup, true);
+                    
+                    
+                    LastCounter = Win32GetTimeCount();
+                    
+                    SwapBuffers(WindowDC);
+#endif
+                    ReleaseDC(WindowHandle, WindowDC);
+                    
+                    FirstTimeInGameLoop = false;
+                }
             }
         }
     }
-}
-
+    

@@ -20,7 +20,6 @@ struct bucket_list
     {
         s32 ResultIndex = -1;
         b32 Found = false;
-        u32 BucketIndex = 0;
         
         for(u32 BucketIndex = 0; BucketIndex < ArrayCount(Buckets) && !Found; ++BucketIndex)
         {
@@ -51,7 +50,7 @@ struct bucket_list
                         MemoryCopy(SourceData, BucketData, ElementSize);
                         
                         if((BucketSizeIndex + 1) == BucketSize ||
-                           (1 << (BucketSizeIndex + 1)) & Bucket->OccupiedBitField)
+                           (u32)(1 << (BucketSizeIndex + 1)) & Bucket->OccupiedBitField)
                         {
                             OccupiedBitField |= BucketOccupiedFlag;
                         }
@@ -82,7 +81,7 @@ struct bucket_list
         if(Bucket->E)
         {
             u32 ElementIndex = Index - BucketIndex;
-            Assert(!(Bucket->OccupiedBitField & (1 << ElementIndex)));
+            Assert(!(Bucket->OccupiedBitField & (u32)(1 << ElementIndex)));
             Result = (u8 *)Bucket->E + ElementIndex*ElementSize;
         }
         
