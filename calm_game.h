@@ -8,16 +8,29 @@
    ======================================================================== */
 
 ////////////////Gameplay defines/////////
-#define END_WITH_OFFSET 0
+#define END_WITH_OFFSET 1
 #define MOVE_DIAGONAL 0
 #define MOVE_VIA_MOUSE 0
 #define PLAYER_MOVE_ACTION IsDown
 #define DEFINE_MOVE_ACTION WasPressed
 #define DRAW_PLAYER_PATH 0
-#define CREATE_PHILOSOPHER 1
+#define CREATE_PHILOSOPHER 0
 #define UPDATE_CAMERA_POS 1
+#define DELETE_PHILOSOPHER_ON_CAPTURE 1
 /////////////////////////////////////////
 
+
+#define ZeroStruct(Instance) ZeroSize(sizeof(Instance), &Instance)
+#define ZeroArray(Instance, Size) ZeroSize(Size*sizeof((Instance)[0]), Instance)
+
+inline void
+ZeroSize(memory_size Size, void *Ptr){
+    uint8 *Byte = (uint8 *)Ptr;
+    while(Size--)
+    {
+        *Byte++ = 0;
+    }
+}
 
 #define CopyArray(Source, Dest, Type, Count) MemoryCopy(Source, Dest, sizeof(Type)*Count);
 
@@ -81,7 +94,8 @@ enum chunk_type {
 #include "calm_bucket.cpp"
 #include "calm_random.h"
 #include "calm_console.h"
-#include "handmade_audio.h"
+#include "calm_sound.h"
+#include "calm_particles.h"
 #include "calm_entity.h"
 #include "calm_menu.h"
 
@@ -129,7 +143,6 @@ struct game_state
 {
     memory_arena MemoryArena;
     memory_arena PerFrameArena;
-    memory_arena SubArena;
     memory_arena ScratchPad;
     memory_arena RenderArena;
     
@@ -143,6 +156,8 @@ struct game_state
     loaded_sound BackgroundMusic;
     loaded_sound FootstepsSound[32];
     
+    world_chunk *ChunkFreeList;
+    
     search_cell *SearchCellFreeList;
     search_cell SearchCellSentinel;
     
@@ -152,16 +167,31 @@ struct game_state
     
     game_mode GameMode;
     
-    world_chunk *Chunks[WORLD_CHUNK_HASH_SIZE]; 
-    
     u32 EntityCount;
     entity Entities[64];
+    
+    world_chunk *Chunks[WORLD_CHUNK_HASH_SIZE]; 
     
     font *Fonts;
     font *GameFont;
     font *DebugFont;
     bitmap MossBlockBitmap;
     bitmap MagicianHandBitmap;
+    bitmap Leaves;
+    bitmap Floor;
+    bitmap Fog;
+    bitmap Man;
+    bitmap Shadow;
+    bitmap Arms;
+    bitmap Legs;
+    bitmap FootPrint;
+    
+    u32 FootPrintCount;
+    u32 FootPrintIndex;
+    v2 FootPrintPostions[1028];
+    
+    b32 HideUnderWorld;
+    timer AlphaFadeTimer;
     
     animation *CurrentAnimation;
     u32 FrameIndex;
@@ -175,6 +205,11 @@ struct game_state
     animation LanternManAnimations[16];
     
     random_series GeneralEntropy;
+    
+    b32 ShowHUD;
+    timer SettingPathTimer;
+    
+    bitmap Lamp;
     
     //
     b32 PlayerIsSettingPath;

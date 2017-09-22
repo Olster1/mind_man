@@ -34,8 +34,9 @@ struct path_nodes {
     u32 Count;
 };
 
-struct entity
-{
+struct entity {
+    u32 ID;  //we no longer identify by pointers _or_ indexes, we search for IDs
+    
     v2 Pos;
     v2 Velocity;
     v2 Dim;
@@ -59,7 +60,8 @@ struct entity
     //For UI editor. Maybe move it to the UI element struct. Oliver 13/8/17 
     v2 RollBackPos;
     //
-    
+    r32 Time;
+    //particle_system ParticleSystem;
     
     // NOTE(OLIVER): This is for the philosopher AI random walk
     v2i LastMoves[1];
@@ -91,7 +93,7 @@ struct entity
     b32 Moves;
     
     r32 InverseWeight;
-    
+    b32 Collides; 
     u32 Index;
 };
 

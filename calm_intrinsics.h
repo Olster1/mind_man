@@ -64,6 +64,12 @@ inline u32 TruncateReal32ToUInt32(r32 Real32)
     return Result;
 }
 
+inline s32 TruncateReal32ToInt32(r32 Real32)
+{
+    s32 Result = (s32)Real32;
+    return Result;
+}
+
 inline r32 SignOf(r32 Value)
 {
     r32 Result = (Value > 0.0f) ? 1.0f : -1.0f;

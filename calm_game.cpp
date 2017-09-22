@@ -7,7 +7,7 @@
    ======================================================================== */
 
 #include "calm_game.h"
-#include "handmade_audio.cpp"
+#include "calm_sound.cpp"
 #include "calm_render.cpp"
 #include "calm_menu.cpp"
 #include "calm_console.cpp"
@@ -66,7 +66,8 @@ internal animation *GetAnimation(animation *Animations, u32 AnimationsCount,  r3
 }
 
 #define GetChunkHash(X, Y) (Abs(X*19 + Y*23) % WORLD_CHUNK_HASH_SIZE)
-internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena, chunk_type Type) {
+internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena, chunk_type Type, world_chunk **FreeListPtr = 0) {
+    
     u32 HashIndex = GetChunkHash(X, Y);
     world_chunk *Chunk = Chunks[HashIndex];
     world_chunk *Result = 0;
@@ -83,7 +84,12 @@ internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, 
     
     if(!Result && Arena) {
         Assert(Type != ChunkNull);
-        Result  = PushStruct(Arena, world_chunk);
+        if(FreeListPtr && *FreeListPtr) {
+            Result = *FreeListPtr;
+            *FreeListPtr = (*FreeListPtr)->Next;
+        } else {
+            Result = PushStruct(Arena, world_chunk);
+        }
         Result->X = X;
         Result->Y = Y;
         Result->MainType = Result->Type = Type;
@@ -92,6 +98,28 @@ internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, 
     }
     
     return Result;
+}
+
+internal b32
+RemoveWorldChunk(world_chunk **Chunks, s32 X, s32 Y, world_chunk **FreeListPtr) {
+    
+    b32 Removed = false;
+    u32 HashIndex = GetChunkHash(X, Y);
+    world_chunk **ChunkPtr = Chunks + HashIndex;
+    
+    while(*ChunkPtr) {
+        world_chunk *Chunk = *ChunkPtr;
+        if(Chunk->X == X && Chunk->Y == Y) {
+            (*ChunkPtr) = Chunk->Next;
+            Chunk->Next = *FreeListPtr;
+            *FreeListPtr = Chunk;
+            Removed = true;
+            break;
+        }
+        
+        ChunkPtr = &Chunk->Next;
+    } 
+    return Removed;
 }
 
 inline void PushOnToList(search_cell **SentinelPtr, s32 X, s32 Y, s32 CameFromX, s32 CameFromY,  memory_arena *Arena, search_cell **FreeListPtr) {
@@ -515,7 +543,7 @@ inline void AddWorldChunks(game_state *GameState, u32 Count, s32 Min, s32 Max, c
         s32 Y = RandomBetween(&GameState->GeneralEntropy, Min, Max);
         s32 X = RandomBetween(&GameState->GeneralEntropy, Min, Max);
         
-        world_chunk *Result = GetOrCreateWorldChunk(GameState->Chunks, X, Y, &GameState->MemoryArena, ChunkType);
+        world_chunk *Result = GetOrCreateWorldChunk(GameState->Chunks, X, Y, &GameState->MemoryArena, ChunkType, &GameState->ChunkFreeList);
         Assert(Result);
         
     }
@@ -529,7 +557,7 @@ AddEntity(game_state *GameState, v2 Pos, entity_type EntityType) {
         if(EntityType == Entity_Block) { Chunk->Type = ChunkBlock; }
     } else {
         chunk_type ChunkType = (EntityType == Entity_Block) ? ChunkBlock: ChunkLight;
-        Chunk = GetOrCreateWorldChunk(GameState->Chunks, (s32)Pos.X, (s32)Pos.Y, &GameState->MemoryArena, ChunkType);
+        Chunk = GetOrCreateWorldChunk(GameState->Chunks, (s32)Pos.X, (s32)Pos.Y, &GameState->MemoryArena, ChunkType, &GameState->ChunkFreeList);
         Chunk->MainType = ChunkLight;
     }
     
@@ -550,8 +578,12 @@ GetEntity(game_state *State, v2 Pos, entity_type Type, b32 TypesMatch = true) {
     entity *Result = 0;
     fori_count(State->EntityCount) {
         entity *Entity = State->Entities + Index;
-        b32 RightType =  (TypesMatch) ? Type == Entity->Type : Type != Entity->Type;
-        if((GetGridLocation(Entity->Pos) == GetGridLocation(Pos) || GetClosestGridLocation(Entity->Pos) == GetClosestGridLocation(Pos)) && RightType) {
+        
+        
+        
+        b32 RightType = (TypesMatch) ? Type == Entity->Type : Type != Entity->Type;
+        
+        if(RightType &&(GetGridLocation(Entity->Pos) == GetGridLocation(Pos) || GetClosestGridLocation(Entity->Pos) == GetClosestGridLocation(Pos))) {
             Result = Entity;
             break;
         }
@@ -632,7 +664,7 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
     //Actually write data
     game_file_handle Handle = Memory->PlatformBeginFileWrite(FileName);
     
-    char MemoryToWrite1[sizeof(world_chunk)] = {};
+    char MemoryToWrite1[256] = {};
     
     s32 SizeOfMemoryToWrite1 = Print(MemoryToWrite1, "//CHUNKS\n");
     
@@ -647,7 +679,7 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
             world_chunk *Chunk = GameState->Chunks[i];
             while(Chunk) {
                 
-                char MemoryToWrite[sizeof(world_chunk)] = {};
+                char MemoryToWrite[256] = {};
                 
                 s32 SizeOfMemoryToWrite = Print(MemoryToWrite, "%d %d %d %d\n", Chunk->X, Chunk->Y, Chunk->Type, Chunk->MainType);
                 
@@ -657,9 +689,52 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
                 
                 WasSuccessful &= (!Handle.HasErrors);
                 
-                
                 Chunk = Chunk->Next;
             }
+        }
+        
+        
+        SizeOfMemoryToWrite1 = Print(MemoryToWrite1, "//ENTITIES\n");
+        
+        Memory->PlatformWriteFile(&Handle, MemoryToWrite1, SizeOfMemoryToWrite1, OffsetAt);
+        
+        OffsetAt += SizeOfMemoryToWrite1;
+        
+        for(u32 i = 0; i < GameState->EntityCount; ++i) {
+            entity *Entity = GameState->Entities + i;
+            
+            char MemoryToWrite[256] = {};
+            
+            s32 SizeOfMemoryToWrite = Print(MemoryToWrite, "%f %f %f %f %d %d ", Entity->Pos.X, Entity->Pos.Y, Entity->Dim.X, Entity->Dim.Y, Entity->Type, Entity->IsInteractable);
+            
+            Memory->PlatformWriteFile(&Handle, MemoryToWrite, SizeOfMemoryToWrite, OffsetAt);
+            
+            OffsetAt += SizeOfMemoryToWrite;
+            
+            WasSuccessful &= (!Handle.HasErrors);
+            
+            //Add chunk types
+            forN_(Entity->ChunkTypeCount, TypeIndex) {
+                SizeOfMemoryToWrite = Print(MemoryToWrite, "%d ", (u32)Entity->ValidChunkTypes[TypeIndex]);
+                
+                Memory->PlatformWriteFile(&Handle, MemoryToWrite, SizeOfMemoryToWrite, OffsetAt);
+                
+                OffsetAt += SizeOfMemoryToWrite;
+                
+                WasSuccessful &= (!Handle.HasErrors);
+                
+                //Add line end
+                if(TypeIndex == (Entity->ChunkTypeCount - 1)) {
+                    Memory->PlatformWriteFile(&Handle, "\n", 1, OffsetAt);
+                    
+                    OffsetAt += SizeOfMemoryToWrite;
+                    
+                    WasSuccessful &= (!Handle.HasErrors);
+                }
+            }
+            
+            
+            
         }
         
         if(!Handle.HasErrors) {
@@ -670,6 +745,141 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
     Memory->PlatformEndFile(Handle);
     
     return WasSuccessful;
+}
+
+#define CastAs(type, value) (*((type *)&value))
+
+internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *GameState) {
+    game_file_handle Handle =  Memory->PlatformBeginFile(FileName);
+    //Handle.HasErrors = true;
+    if(!Handle.HasErrors) {
+        AddToOutBuffer("Loaded Level File \n");
+        size_t FileSize = Memory->PlatformFileSize(FileName);
+        temp_memory TempMem = MarkMemory(&GameState->ScratchPad);
+        void *FileMemory = PushSize(&GameState->ScratchPad, FileSize);
+        if(FileSize) {
+            Memory->PlatformReadFile(Handle, FileMemory, FileSize, 0);
+            if(!Handle.HasErrors) {
+                
+                enum file_data_type {
+                    DATA_NULL, 
+                    DATA_CHUNKS, 
+                    DATA_ENTITIES,
+                };
+                
+                file_data_type DataType = DATA_NULL;
+                
+                char*At = (char *)FileMemory;
+                while(*At != '\0') {
+                    
+                    s32 Negative = 1;
+                    
+                    value_data Datas[256] = {};
+                    u32 DataAt = 0;
+                    if(*At == '\n') {
+                        At++;
+                    }
+                    if(*At == '\0') {
+                        break;
+                    }
+                    while(*At != '\n' && *At != '\0') {
+                        switch(*At) {
+                            case ' ': {
+                                At++;
+                            } break;
+                            case '/': {
+                                At++;
+                                if(*At == '/') {
+                                    char *ChunkID = "CHUNKS";
+                                    char *EntitiesID = "ENTITIES";
+                                    
+                                    At++;
+                                    
+                                    if(DoStringsMatch(ChunkID, At, StringLength(ChunkID))) {
+                                        DataType = DATA_CHUNKS;
+                                    } else if(DoStringsMatch(EntitiesID, At, StringLength(EntitiesID))) {
+                                        DataType = DATA_ENTITIES;
+                                    }
+                                    while(*At != '\n' && *At != '\0') {
+                                        At++;
+                                    }
+                                    if(*At == '\n') {
+                                        At++;
+                                    }
+                                    
+                                }
+                            } break;
+                            case '-': {
+                                Negative = -1;
+                                At++;
+                            } break;
+                            default: {
+                                if(IsNumeric(*At)) {
+                                    char *AtStart = At;
+                                    b32 IsFloat = false;
+                                    while(IsNumeric(*At)) {
+                                        if(*At == '.') {
+                                            IsFloat = true;
+                                        } 
+                                        
+                                        At++;
+                                    }
+                                    s32 Length = (s32)(At - AtStart);
+                                    value_data *Data = Datas + DataAt++;
+                                    if(IsFloat) {
+                                        Data->Type = VALUE_FLOAT;
+                                        
+                                        r32 *A = (r32 *)&Data->Value;
+                                        *A = StringToFloat(AtStart, Length);
+                                    } else {
+                                        Data->Type = VALUE_INT;
+                                        s32 *A = (s32 *)&Data->Value;
+                                        *A = StringToInteger(AtStart, Length);
+                                    }
+                                    
+                                    Negative = 1;
+                                    
+                                } else {
+                                    InvalidCodePath;
+                                }
+                            }
+                            
+                        }
+                        
+                    }
+                    
+                    Assert(DataType != DATA_NULL);
+                    
+                    if(DataType == DATA_CHUNKS) {
+                        Assert(DataAt == 4);
+                        world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, CastAs(s32, Datas[0].Value), CastAs(s32, Datas[1].Value), &GameState->MemoryArena, (chunk_type)CastAs(s32, Datas[3].Value), &GameState->ChunkFreeList);
+                        Chunk->Type = (chunk_type)CastAs(s32, Datas[2].Value);
+                        
+                    } else if(DataType == DATA_ENTITIES) {
+                        u32 EntityInfoCount = 6;
+                        Assert(DataAt >= EntityInfoCount);
+                        v2 Pos = V2(CastAs(r32, Datas[0].Value), CastAs(r32, Datas[1].Value));
+                        v2 Dim = V2(CastAs(r32, Datas[2].Value), CastAs(r32, Datas[3].Value));
+                        entity_type Type = (entity_type)CastAs(s32, Datas[4].Value);
+                        b32 IsInteractable = (b32)CastAs(s32, Datas[5].Value);
+                        
+                        entity *Entity = InitEntity(GameState, Pos, Dim, Type, IsInteractable);
+                        for(u32 ValueIndex = EntityInfoCount; ValueIndex < DataAt; ++ValueIndex) {AddChunkType(Entity, (chunk_type)CastAs(s32, Datas[ValueIndex].Value));
+                        }
+                        
+                    }
+                }
+            }
+        }
+        ReleaseMemory(&TempMem);
+        
+    } else {
+        
+        //AddWorldChunks(GameState, 200, 0, 100, ChunkLight);
+        //AddWorldChunks(GameState, 200, -100, 0, ChunkDark);
+    }
+    Memory->PlatformEndFile(Handle);
+    
 }
 
 internal void
@@ -699,6 +909,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         AddChunkType(GameState->Player, ChunkLight);
         
         GameState->Camera = InitEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera);
+        GameState->Camera->Collides = false;
         
         //InitEntity(GameState, V2(2, 2), V2(1, 1), Entity_Guru, true);
         
@@ -777,92 +988,16 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     || Pos == Philosopher->Pos
                     #endif
                     );
-            AddEntity(GameState, Pos, Entity_Block);
+            //AddEntity(GameState, Pos, Entity_Block);
         }
         
         // NOTE(OLIVER): Create Board
         
-        char *FileName = "level1.omm";
-        game_file_handle Handle =  Memory->PlatformBeginFile(FileName);
-        if(!Handle.HasErrors) {
-            AddToOutBuffer("Loaded Level File \n");
-            size_t FileSize = Memory->PlatformFileSize(FileName);
-            temp_memory TempMem = MarkMemory(&GameState->ScratchPad);
-            void *FileMemory = PushSize(&GameState->ScratchPad, FileSize);
-            if(FileSize) {
-                Memory->PlatformReadFile(Handle, FileMemory, FileSize, 0);
-                if(!Handle.HasErrors) {
-                    char*At = (char *)FileMemory;
-                    while(true) {
-                        if(*At == '\0') {
-                            break;
-                        }
-                        s32 Negative = 1;
-                        s32 Data[4] = {};
-                        u32 DataAt = 0;
-                        if(*At == '\n') {
-                            At++;
-                        }
-                        while(*At != '\n' && *At != '\0') {
-                            switch(*At) {
-                                case ' ': {
-                                    At++;
-                                } break;
-                                case '/': {
-                                    At++;
-                                    if(*At == '/') {
-                                        while(*At != '\n' && *At != '\0') {
-                                            At++;
-                                        }
-                                        if(*At == '\n') {
-                                            At++;
-                                        }
-                                        
-                                    }
-                                } break;
-                                case '-': {
-                                    Negative = -1;
-                                    At++;
-                                } break;
-                                default: {
-                                    if(IsNumeric(*At)) {
-                                        u32 ValuesAt = 0;
-                                        s32 Values[512] = {};
-                                        while(IsNumeric(*At)) {
-                                            Values[ValuesAt++] = (s32)(*At - '0');
-                                            At++;
-                                        }
-                                        u32 SizeOfArray = ValuesAt - 1;
-                                        for(u32 i = 0; i < ValuesAt; ++i) {
-                                            Data[DataAt++] += Negative*Values[i]*Power(10, (SizeOfArray - i));
-                                        }
-                                        Negative = 1;
-                                        
-                                    } else {
-                                        InvalidCodePath;
-                                    }
-                                }
-                                
-                            }
-                            
-                        }
-                        if(DataAt == 4) { 
-                            world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Data[0], Data[1], &GameState->MemoryArena, (chunk_type)Data[3]);
-                            Chunk->Type = (chunk_type)Data[2];
-                        }
-                    }
-                }
-            }
-            ReleaseMemory(&TempMem);
-            Memory->PlatformEndFile(Handle);
-        } else {
-            AddWorldChunks(GameState, 200, 0, 10, ChunkLight);
-            AddWorldChunks(GameState, 200, -10, 0, ChunkDark);
-        }
+        LoadLevelFile("level1.omm", Memory, GameState);
         
         // NOTE(OLIVER): Make sure player is on a valid tile
         v2i PlayerPos = GetGridLocation(GameState->Player->Pos);
-        GetOrCreateWorldChunk(GameState->Chunks, PlayerPos.X, PlayerPos.Y, &GameState->MemoryArena, ChunkDark);
+        GetOrCreateWorldChunk(GameState->Chunks, PlayerPos.X, PlayerPos.Y, &GameState->MemoryArena, ChunkDark, &GameState->ChunkFreeList);
 #if CREATE_PHILOSOPHER
         v2i PhilosopherPos = GetGridLocation(Philosopher->Pos);
         GetOrCreateWorldChunk(GameState->Chunks, PhilosopherPos.X, PhilosopherPos.Y, &GameState->MemoryArena, ChunkLight);
@@ -1167,7 +1302,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                         world_chunk *NextChunk = GetOrCreateWorldChunk(GameState->Chunks, BlockTargetPos.X, BlockTargetPos.Y, 0, ChunkNull);
                         entity *Block = GetEntity(GameState, WorldChunkInMeters*V2i(GridTargetPos), Entity_Block);
                         Assert(Block && Block->Type == Entity_Block);
-                        if(NextChunk && IsValidType(NextChunk, Block->ValidChunkTypes, Block->ChunkTypeCount) && !GetEntity(GameState, V2i(BlockTargetPos), Entity_Philosopher, false)) {
+                        if(NextChunk && IsValidType(NextChunk, Block->ValidChunkTypes, Block->ChunkTypeCount) && !GetEntity(GameState, V2i(BlockTargetPos), Entity_Philosopher, true)) {
                             Chunk->Type = Chunk->MainType;
                             NextChunk->Type = ChunkBlock;
                             InitializeMove(GameState, Block, WorldChunkInMeters*V2i(BlockTargetPos));
@@ -1222,6 +1357,10 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
 #define DRAW_GRID 1
             
 #if DRAW_GRID
+            r32 AlphaAt = 1.0f;
+            if(GameState->HideUnderWorld) {
+                
+            }
             r32 ScreenFactor = 0.7f;
             v2 HalfScreenDim = ScreenFactor*Hadamard(Inverse(RenderGroup->Transform.Scale), RenderGroup->ScreenDim);
             v2i Min = ToV2i(CamPos - HalfScreenDim);
@@ -1640,12 +1779,16 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                         if(DoStringsMatch(A, "chunk_type")) {
                             CastValue(Info, chunk_type);
                             
-                            if(!Chunk) {
-                                Assert(Value != ChunkNull);
-                                Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value);
+                            if(Chunk && Chunk->Type == Value) {
+                                RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
+                            } else {
+                                if(!Chunk) {
+                                    Assert(Value != ChunkNull);
+                                    Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
+                                } 
+                                
+                                Chunk->Type = Value;
                             }
-                            
-                            Chunk->Type = Value;
                         }
                     } else {
                         AddToOutBuffer("No Entity type selected\n");
@@ -1836,4 +1979,3 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
     ReleaseMemory(&PerFrameMemory);
     
 }
-

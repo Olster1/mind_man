@@ -9,11 +9,6 @@
 /*
 // TODO(OLIVER): 
 
-  Fix offset on tile moves
-  
-  Takes pictures of grant's castles and put in game
-  
-  Parse strings as words when drawing them
 */
 #include <stdint.h>
 

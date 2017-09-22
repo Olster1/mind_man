@@ -7,7 +7,7 @@
    ======================================================================== */
 
 #define WRITE_FONT_FILE 0
-#define SWAP_BUFFER_INTERVAL 2
+#define SWAP_BUFFER_INTERVAL 1
 
 #include <windows.h>
 #include <stdio.h>
@@ -240,6 +240,8 @@ PLATFORM_WRITE_FILE(Win32WriteFile)
     HANDLE FileHandle = (HANDLE)Handle->Data;
     if(!Handle->HasErrors)
     {
+        Handle->HasErrors = true; // we set this here to avoid having to do elses and set 'HasErrors' to true
+        
         if(FileHandle)
         {
             if(SetFilePointer(FileHandle, Offset, 0, FILE_BEGIN) !=  INVALID_SET_FILE_POINTER)
@@ -249,7 +251,7 @@ PLATFORM_WRITE_FILE(Win32WriteFile)
                 {
                     if(BytesWritten == Size) {
                         Handle->HasErrors = false;
-                    }
+                    } 
                 }
                 else
                 {
@@ -355,7 +357,7 @@ Win32InitOpenGL(HWND Window) {
     DesiredPixelFormat.iPixelType = PFD_TYPE_RGBA;
     DesiredPixelFormat.nVersion = 1;
     DesiredPixelFormat.dwFlags = PFD_SUPPORT_OPENGL|PFD_DRAW_TO_WINDOW|PFD_DOUBLEBUFFER;
-    DesiredPixelFormat.cColorBits = 32;
+    DesiredPixelFormat.cColorBits = 24;
     DesiredPixelFormat.cAlphaBits = 8;
     DesiredPixelFormat.iLayerType = PFD_MAIN_PLANE;
     
@@ -381,7 +383,7 @@ Win32InitOpenGL(HWND Window) {
                 WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
                 WGL_CONTEXT_MINOR_VERSION_ARB, 0,
                 WGL_CONTEXT_FLAGS_ARB, 0 // NOTE(OLIVER): Enable For testing WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB
-#if HANDMADE_INTERNAL
+#if _INTERNAL
                 |WGL_CONTEXT_DEBUG_BIT_ARB
 #endif
                 ,
@@ -704,6 +706,8 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
 #endif
             GlobalRunning = true;
             
+            ShowCursor(FALSE);
+            
             Win32InitOpenGL(WindowHandle);
             
             SYSTEM_INFO SystemInfo;
@@ -827,7 +831,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             GameMemory.PlatformBeginFileWrite = Win32BeginFileWrite;
             GameMemory.PlatformEndFile = Win32EndFile;
             GameMemory.GameRunningPtr = &GlobalRunning;
-            GameMemory.SoundOn = true;
+            GameMemory.SoundOn = false;
             
 #if WRITE_FONT_FILE
             Win32WriteFontFile();
@@ -893,6 +897,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 
                 
                 GetButtonState(GameMemory.GameButtons + Button_F2, VK_F2);
+                GetButtonState(GameMemory.GameButtons + Button_F3, VK_F3);
                 
                 GetButtonState(GameMemory.GameButtons + Button_LeftMouse, VK_LBUTTON);
                 GetButtonState(GameMemory.GameButtons + Button_RightMouse, VK_RBUTTON);
@@ -1064,11 +1069,12 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                         GameSoundBuffer.SamplesPerSecond = SoundInfo.SamplesPerSec;
                         GameSoundBuffer.ChannelCount = SoundInfo.NumberOfChannels;
                         
-                        
+#if 1
                         GameWriteAudioSamples(&GameMemory, &GameSoundBuffer);
                         Win32WriteAudioSamplesToBuffer(GlobalSoundBuffer, AudioSamples,
                                                        SoundInfo.BufferByteAt,
                                                        BytesToWrite, &SoundInfo);
+#endif
                         SoundInfo.BufferByteAt += BytesToWrite;
                         SoundInfo.BufferByteAt %= SoundInfo.BufferLengthInBytes;
                         
@@ -1103,7 +1109,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
 #else
                     
                     
-#define DRAW_FRAME_RATE 1
+#define DRAW_FRAME_RATE 0
 #if DRAW_FRAME_RATE
                     SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
                     

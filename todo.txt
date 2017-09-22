@@ -1,5 +1,11 @@
-Do text sizes on the renderer. 
+PROGRAMMING:
+Entities have ids instead of pointers and indexes! 
+Store Chunktypes entities can walk on in text file.  
 
-Make moving easier
+ART: 
+Takes pictures of grant's castles and put in game
+  
+Do text sizes on the renderer. 
+  
 
 

@@ -180,7 +180,7 @@ MinkowskiSum(memory_arena *Arena, entity *EntityA, entity *EntityB, r32 SumBias)
     v2 *VertexB = 0;
     
     
-    if(EntityB->Type == Entity_Player)
+    if(EntityA->Type == Entity_Player)
     {
         VertexBCount = 4;
         VertexB = PushArray(Arena, v2, VertexBCount);
@@ -271,10 +271,9 @@ internal void
 UpdateEntityPositionWithImpulse(game_state *GameState, entity *Entity, r32 dt, v2 Acceleration, b32 Collides = true)
 {
     
-    r32 DragCoeff = 0.4f;
+    r32 DragCoeff = 0.8f;
     v2 EntityNewPos = 0.5f*Sqr(dt)*Acceleration + dt*Entity->Velocity + Entity->Pos;
     Entity->Velocity += dt*Acceleration - DragCoeff*Entity->Velocity;
-    
     
     v2 DeltaEntityPos = EntityNewPos - Entity->Pos;
     
@@ -290,7 +289,7 @@ UpdateEntityPositionWithImpulse(game_state *GameState, entity *Entity, r32 dt, v
             for(u32 EntityIndex = 0; EntityIndex < GameState->EntityCount; ++EntityIndex)
             {
                 entity *TestEntity = GameState->Entities + EntityIndex;
-                if(TestEntity != Entity)
+                if(TestEntity != Entity && TestEntity->Collides)
                 {
                     array_v2 VertexPoints = MinkowskiSum(&GameState->PerFrameArena, Entity, TestEntity, TestEntity->FacingDirection);
                     
@@ -414,7 +413,7 @@ inline void AddChunkTypeToChunkChanger(entity *Entity, chunk_type Type) {
 
 inline void EndPath(entity *Entity) {
     if(Entity->Path.Count > 0) {
-        Assert(Entity->Path.Count > Entity->VectorIndexAt);
+        //Assert(Entity->Path.Count > Entity->VectorIndexAt);
         Entity->Path.Count = Entity->VectorIndexAt;
     }
 }
@@ -446,12 +445,18 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsIntera
     //Entity->LastMoves;;
     Entity->LastMoveAt = 0;
     Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion
-    
+    /*
+    particle_system_settings Set = InitParticlesSettings();
+    Set.LifeSpan = 0.9f;
+    InitParticleSystem(&Entity->ParticleSystem, &Set, 12);
+    */
 #if INTERNAL_BUILD
+    /*
     ui_element_settings Set = {};
     Set.ValueLinkedTo = Entity;
     
     AddUIElement(GameState->UIState, UI_Entity, Set);
+    */
 #endif
     
     return Entity;
@@ -476,7 +481,8 @@ internal inline void MarkAsDeprecated(ui_state *UIState, ui_element *Elm) {
 
 internal inline b32  
 RemoveEntityUIElement(ui_state *UIState, entity *Entity) {
-    Assert(UIState->ElmCount < ArrayCount(UIState->Elements));Assert(UIState->ElmCount >= 0);
+    Assert(UIState->ElmCount < ArrayCount(UIState->Elements));
+    Assert(UIState->ElmCount >= 0);
     
     b32 WasRemoved = false;
     
@@ -508,12 +514,13 @@ internal inline b32 RemoveEntity(game_state *GameState, u32 EntityIndex) {
         entity *EntityA = &GameState->Entities[--GameState->EntityCount];
         entity *EntityB = &GameState->Entities[EntityIndex];
         *EntityB = *EntityA;
+        EntityB->Index = EntityIndex;
         // Init Entity clears it as well. So probably don't need. 
-        EntityA = {}; 
+        *EntityA = {}; 
         //
         
 #if INTERNAL_BUILD
-        RemoveEntityUIElement(GameState->UIState, EntityB);
+        //RemoveEntityUIElement(GameState->UIState, EntityB);
 #endif
         
         WasRemoved = true;

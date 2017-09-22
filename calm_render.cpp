@@ -147,8 +147,7 @@ struct bitmap_header
 #pragma pack(pop)
 
 internal bitmap
-LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 AlignPercent = V2(0.5f, 0.5f))
-{
+LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 AlignPercent = V2(0.5f, 0.5f)) {
     bitmap Result = {};
     
     file_read_result FileContents = Memory->PlatformReadEntireFile(FileName);
@@ -194,7 +193,7 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
             for(s32 i = 0; i < (s32)(Result.Width*Result.Height); ++i) {
                 r32 Alpha = (r32)(At[3])/255.0f;
                 for(int colorIndex = 0; colorIndex < 3; ++colorIndex) {
-                    //At[colorIndex] = (u8)((r32)At[colorIndex]* Alpha); 
+                    At[colorIndex] = (u8)((r32)At[colorIndex]* Alpha); 
                 }
                 
                 At += 4; 
@@ -495,7 +494,13 @@ void PushRectOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color = V4(0
     Info->Dim = Transform(&Group->Transform, Dim);
     Info->Color = Color;
 }
-
+inline void PushRectCenterOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color = V4(0, 0, 0, 1)) {
+    
+    v2 WHDim = V2(GetWidth(Dim), GetHeight(Dim));
+    rect2 NewDim = Rect2CenterDim(Dim.Min, WHDim);
+    PushRectOutline(Group, NewDim, ZDepth, Color);
+    
+}
 
 void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpace,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
     render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
@@ -514,6 +519,7 @@ void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpa
     Info->ZDepth = Pos.Z;
 }
 
+
 void PushBitmapScale(render_group *Group, v3 Pos, bitmap *Bitmap, r32 Scale,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
     
     PushBitmap(Group, Pos, Bitmap, Scale*Bitmap->Width, ClipRect, Color);
@@ -528,6 +534,13 @@ void PushRect(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
     Info->Dim = Transform(&Group->Transform, Dim);
     Info->Color = Color;
 }
+
+void PushRectCenter(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
+    v2 WHDim = V2(GetWidth(Dim), GetHeight(Dim));
+    rect2 NewDim = Rect2CenterDim(Dim.Min, WHDim);
+    PushRect(Group, NewDim, ZDepth, Color);
+}
+
 
 internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, v2 Rotation) {
     Group->ScreenDim = V2i(Buffer->Width, Buffer->Height);

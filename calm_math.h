@@ -61,6 +61,7 @@ struct mat2
 };
 
 #define Sqr(Value) ((r32)(Value)*(r32)(Value))
+#define Square(Value) Sqr(Value)
 
 inline mat2
 IdentityMatrix2()
@@ -247,6 +248,16 @@ inline r32 Clamp(r32 Min, r32 Value, r32 Max) {
     return Value;
 }
 
+inline r32 Clamp01(r32 Value) {
+    if(Value < 0) {
+        Value = 0;
+    }
+    if(Value > 1) {
+        Value = 1;
+    }
+    return Value;
+}
+
 
 inline s32 ClampS32(s32 Min, s32 Value, s32 Max) {
     if(Value < Min) {
@@ -268,6 +279,21 @@ inline u32 ClampU32(u32 Min, u32 Value, u32 Max) {
     return Value;
 }
 
+
+inline real32
+MapRange_And_Clamp01(real32 Min, real32 t, real32 Max)
+{
+    real32 Range = (Max - Min);
+    real32 Result = 0.0f;
+    
+    if(Range != 0.0f)
+    {
+        Result = Clamp01((t - Min) / Range);
+    }
+    
+    return Result;
+    
+}
 inline r32 Wrap(r32 Min, r32 Value, r32 Max) {
     if(Value < Min) {
         Value = Max;
@@ -604,6 +630,17 @@ Abs(v2 Value)
 //NOTE(oliver): V3 operations
 
 inline v3
+ToV3(v2 XY, real32 Z)
+{
+    v3 Result = {};
+    
+    Result.XY = XY;
+    Result.Z = Z;
+    
+    return Result;
+}
+
+inline v3
 operator *(r32 Scalar, v3 A)
 {
     v3 Result;
@@ -614,10 +651,39 @@ operator *(r32 Scalar, v3 A)
     return Result;
 }
 
+inline v3
+operator +(v3 A, v3 B)
+{
+    v3 Result;
+    Result.X = A.X + B.X;
+    Result.Y = A.Y + B.Y;
+    Result.Z = A.Z + B.Z;
+    
+    return Result;
+}
+
+inline v3
+operator -(v3 A, v3 B)
+{
+    v3 Result;
+    Result.X = A.X - B.X;
+    Result.Y = A.Y - B.Y;
+    Result.Z = A.Z - B.Z;
+    
+    return Result;
+}
+
 inline v3 &
 operator *=(v3 &A, r32 Scalar)
 {
     A = Scalar*A;
+    return A;
+}
+
+inline v3 &
+operator +=(v3 &A, v3 B)
+{
+    A = A + B;
     return A;
 }
 
@@ -873,6 +939,12 @@ inline r32 GetHeight(rect2 Rect)
 {
     r32 Result = Rect.MaxY - Rect.MinY;
     return Result;
+}
+
+inline v2 Center(rect2 A) {
+    v2 Result = A.Min + 0.5f*V2(GetWidth(A), GetHeight(A));
+    return Result;
+    
 }
 
 #define LARGE_NUMBER 100000.0f

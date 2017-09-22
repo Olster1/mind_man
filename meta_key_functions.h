@@ -10,5 +10,6 @@ GetButtonState_(GameMemory.GameButtons + Button_Enter, 1, VK_RETURN);
 GetButtonState_(GameMemory.GameButtons + Button_Shift, 1, VK_SHIFT);
 GetButtonState_(GameMemory.GameButtons + Button_F1, 1, VK_F1);
 GetButtonState_(GameMemory.GameButtons + Button_F2, 1, VK_F2);
+GetButtonState_(GameMemory.GameButtons + Button_F3, 1, VK_F3);
 GetButtonState_(GameMemory.GameButtons + Button_LeftMouse, 1, VK_LBUTTON);
 GetButtonState_(GameMemory.GameButtons + Button_RightMouse, 1, VK_RBUTTON);
