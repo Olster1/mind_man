@@ -8,15 +8,16 @@
    ======================================================================== */
 
 ////////////////Gameplay defines/////////
-#define END_WITH_OFFSET 1
-#define MOVE_DIAGONAL 0
+#define END_WITH_OFFSET 0
+#define MOVE_DIAGONAL 1
 #define MOVE_VIA_MOUSE 0
 #define PLAYER_MOVE_ACTION IsDown
 #define DEFINE_MOVE_ACTION WasPressed
 #define DRAW_PLAYER_PATH 0
 #define CREATE_PHILOSOPHER 0
 #define UPDATE_CAMERA_POS 1
-#define DELETE_PHILOSOPHER_ON_CAPTURE 1
+#define DELETE_PHILOSOPHER_ON_CAPTURE 0
+#define LOAD_LEVEL_FROM_FILE 1
 /////////////////////////////////////////
 
 
@@ -59,6 +60,9 @@ internal u32 StringLength(char *A) {
 }
 
 #define MoveToList(LinkPtr, FreeList, type) type *Next = (*LinkPtr)->Next; (*LinkPtr)->Next = FreeList; FreeList = *LinkPtr; *LinkPtr = Next;
+
+#define GetStringSizeFromChar(At, Start) (u32)((intptr)At - (intptr)Start)
+#define GetRemainingSize(At, Start, TotalSize) (TotalSize - GetStringSizeFromChar(At, Start))
 
 struct timer {
     r32 Value;
@@ -113,7 +117,6 @@ struct quality_info {
 };
 
 enum animation_qualities {
-    POSE,
     DIRECTION,
     ANIMATE_QUALITY_COUNT
 };
@@ -122,6 +125,7 @@ struct animation {
     bitmap Frames[32];
     u32 FrameCount;
     r32 Qualities[ANIMATE_QUALITY_COUNT];
+    char *Name;
 };
 
 static r32 WorldChunkInMeters = 1.0f;
@@ -134,6 +138,29 @@ struct world_chunk {
     chunk_type MainType;
     
     world_chunk *Next;
+};
+
+enum tile_pos_type {
+    NULL_TILE,
+    
+    TOP_LEFT_TILE,
+    TOP_CENTER_TILE,
+    TOP_RIGHT_TILE,
+    
+    CENTER_LEFT_TILE,
+    CENTER_TILE,
+    CENTER_RIGHT_TILE,
+    
+    BOTTOM_LEFT_TILE,
+    BOTTOM_CENTER_TILE,
+    BOTTOM_RIGHT_TILE,
+    
+    TILE_POS_COUNT
+};
+
+struct tile_type_layout {
+    tile_pos_type Type;
+    s32 E[3][3];
 };
 
 #define WORLD_CHUNK_HASH_SIZE 4096
@@ -150,8 +177,6 @@ struct game_state
     playing_sound *PlayingSoundsFreeList;
     
     //These should never move i.e. we should never get a null pointer. Maybe we could change all entity pointers to an ID and we look up that ID instead of getting dangling pointer...//
-    entity *Camera;
-    entity *Player;
     
     loaded_sound BackgroundMusic;
     loaded_sound FootstepsSound[32];
@@ -167,6 +192,7 @@ struct game_state
     
     game_mode GameMode;
     
+    u32 EntityIDAt;
     u32 EntityCount;
     entity Entities[64];
     
@@ -177,6 +203,14 @@ struct game_state
     font *DebugFont;
     bitmap MossBlockBitmap;
     bitmap MagicianHandBitmap;
+    
+    bitmap DarkTiles[TILE_POS_COUNT];
+    
+    bitmap StaticUp;
+    bitmap StaticDown;
+    bitmap StaticLeft;
+    bitmap StaticRight;
+    
     bitmap Leaves;
     bitmap Floor;
     bitmap Fog;
@@ -185,6 +219,10 @@ struct game_state
     bitmap Arms;
     bitmap Legs;
     bitmap FootPrint;
+    bitmap Desert;
+    bitmap Water;
+    bitmap Lamp;
+    bitmap Test;
     
     u32 FootPrintCount;
     u32 FootPrintIndex;
@@ -193,13 +231,13 @@ struct game_state
     b32 HideUnderWorld;
     timer AlphaFadeTimer;
     
+    menu PauseMenu;
+    menu GameOverMenu;
+    
     animation *CurrentAnimation;
     u32 FrameIndex;
     r32 FramePeriod;
     r32 FrameTime;
-    
-    menu PauseMenu;
-    menu GameOverMenu;
     
     u32 LanternAnimationCount;
     animation LanternManAnimations[16];
@@ -207,9 +245,8 @@ struct game_state
     random_series GeneralEntropy;
     
     b32 ShowHUD;
+    b32 RenderMainChunkType;
     timer SettingPathTimer;
-    
-    bitmap Lamp;
     
     //
     b32 PlayerIsSettingPath;

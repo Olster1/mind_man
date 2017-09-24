@@ -147,6 +147,62 @@ struct bitmap_header
 #pragma pack(pop)
 
 internal bitmap
+CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear)
+{
+    bitmap Result;
+    
+    Result.Width = Width;
+    Result.AlignPercent = V2(0.5f, 0.5f);
+    Result.Height = Height;
+    Result.Pitch = Width *sizeof(u32);
+    
+    u32 MemorySize = Width*Height*sizeof(u32);
+    Result.Bits = PushArray(Arena, u32, Width*Height);
+    
+    if(Clear)
+    {
+        ClearMemory(Result.Bits, MemorySize);
+    }
+    
+    return Result;
+}
+
+internal bitmap LoadImage(memory_arena *Arena, char *Filename) {
+    int x,y,n;
+    unsigned char *data = stbi_load(Filename, &x, &y, &n, STBI_rgb_alpha);
+    
+    bitmap
+        Result = CreateNewBitmap(Arena, x, y, false);
+    
+#define ExtractBits(Pointer, Shift) (u32)((*Pointer >> Shift) & 0xff)
+    
+    u32 *Src = (u32 *)data;
+    u32 *Dest = (u32 *)Result.Bits;
+    forNs(y) {
+        forNs(x) {
+            u32 B = ExtractBits(Src, 0);
+            u32 G = ExtractBits(Src, 8);
+            u32 R = ExtractBits(Src, 16);
+            u32 A = ExtractBits(Src, 24);
+            
+            u32 Color = (A << 24 |
+                         R << 0 |
+                         G << 8 |
+                         B << 16);
+            
+            //Assert(Color == *Src);
+            *Dest = Color;
+            Dest++;
+            Src++;
+        }
+    }
+    
+    stbi_image_free(data);
+    
+    return Result;
+}
+
+internal bitmap
 LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 AlignPercent = V2(0.5f, 0.5f)) {
     bitmap Result = {};
     
@@ -205,30 +261,6 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
     return Result;
     
 }
-
-internal bitmap
-CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear)
-{
-    bitmap Result;
-    
-    Result.Width = Width;
-    Result.Height = Height;
-    Result.Pitch = Width *sizeof(u32);
-    
-    u32 MemorySize = Width*Height*sizeof(u32);
-    Result.Bits = PushArray(Arena, u32, Width*Height);
-    
-    if(Clear)
-    {
-        ClearMemory(Result.Bits, MemorySize);
-    }
-    
-    return Result;
-    
-    
-    
-}
-
 
 internal void
 DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrigin_, rect2 Bounds, v4 Color = V4(1, 1, 1, 1))

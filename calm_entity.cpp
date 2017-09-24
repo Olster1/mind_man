@@ -21,6 +21,28 @@ IsRemoved(u32 Index, u32 RemoveBitField)
     return Result;
 }
 
+inline entity *FindFirstEntityOfType(game_state *GameState, entity_type Type) {
+    entity *Result = 0;
+    for(u32 i = 0; i < GameState->EntityCount; ++i) {
+        entity *Entity = GameState->Entities + i;
+        if(Entity->Type == Type) {
+            Result = Entity;
+        }
+    }
+    return Result;
+}
+
+inline entity *FindEntityFromID(game_state *GameState, u32 ID) {
+    entity *Result = 0;
+    for(u32 i = 0; i < GameState->EntityCount; ++i) {
+        entity *Entity = GameState->Entities + i;
+        if(Entity->ID == ID) {
+            Result = Entity;
+        }
+    }
+    return Result;
+}
+
 internal array_v2
 MinkowskiSumConvexHull(memory_arena *Arena, v2 *VertexA, u32 CountA, v2 *VertexB, u32 CountB, r32 SumBias)
 {
@@ -419,13 +441,16 @@ inline void EndPath(entity *Entity) {
 }
 
 inline entity *
-InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsInteractable = false) {
+InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID) {
     Assert(GameState->EntityCount < ArrayCount(GameState->Entities));
     
     u32 EntityIndex = GameState->EntityCount++;
     entity *Entity = &GameState->Entities[EntityIndex];
     
+    Assert(ID < GameState->EntityIDAt);
+    
     *Entity = {};
+    Entity->ID = ID;
     Entity->Velocity = {};
     Entity->MovePeriod = 0.3f;
     Entity->Pos = Pos;
@@ -436,13 +461,12 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsIntera
     Entity->Rotation = Mat2();
     Entity->FacingDirection = 1;
     Entity->Type = Type;
-    Entity->IsInteractable = IsInteractable;
     Entity->TriggerAction = false;
     Entity->LifeSpan = 10.0f;
     Entity->ChunkTimer = {};
     Entity->ChunkTimer.Period = 1.0f;
     
-    //Entity->LastMoves;;
+    //Entity->LastMoves;
     Entity->LastMoveAt = 0;
     Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion
     /*
@@ -451,12 +475,14 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, b32 IsIntera
     InitParticleSystem(&Entity->ParticleSystem, &Set, 12);
     */
 #if INTERNAL_BUILD
-    /*
-    ui_element_settings Set = {};
-    Set.ValueLinkedTo = Entity;
     
+    ui_element_settings Set = {};
+    u32 *Address = (u32 *)&Set.ValueLinkedTo;
+    *Address = Entity->ID;
+    //We set the pointer later in the function so it doesn't point to the stack but the actual reference!
+    Assert(GameState->UIState->StackAt == 0);
     AddUIElement(GameState->UIState, UI_Entity, Set);
-    */
+    
 #endif
     
     return Entity;
@@ -476,11 +502,10 @@ internal inline void MarkAsDeprecated(ui_state *UIState, ui_element *Elm) {
     Elm->IsValid = false;
     Assert(UIState->FreeElmCount < ArrayCount(UIState->ElementsFree));
     UIState->ElementsFree[UIState->FreeElmCount++] = Elm->Index;
-    UIState->ElmCount--;
 }
 
 internal inline b32  
-RemoveEntityUIElement(ui_state *UIState, entity *Entity) {
+RemoveEntityUIElement(ui_state *UIState, entity *Entity, game_state *GameState) {
     Assert(UIState->ElmCount < ArrayCount(UIState->Elements));
     Assert(UIState->ElmCount >= 0);
     
@@ -489,17 +514,18 @@ RemoveEntityUIElement(ui_state *UIState, entity *Entity) {
     if(UIState->ElmCount > 0) {
         fori_count(UIState->ElmCount) {
             ui_element *Elm = UIState->Elements + Index;
-            entity *EntityPtr = (entity *)Elm->Set.ValueLinkedTo;
-            if(Elm->Type == UI_Entity && EntityPtr->Index == Entity->Index) {
-                MarkAsDeprecated(UIState, Elm);
-                MarkAsDeprecated(UIState, Elm->Parent);
-                WasRemoved = true;
-                break;
+            if(Elm->Type == UI_Entity && Elm->Set.ValueLinkedToPtr) {
+                u32 EntityID = CastVoidAs(u32, Elm->Set.ValueLinkedToPtr);
+                if(EntityID == Entity->ID) {
+                    MarkAsDeprecated(UIState, Elm);
+                    MarkAsDeprecated(UIState, Elm->Parent);
+                    WasRemoved = true;
+                    break;
+                }
             }
         }
     }
-    
-    //Assert(WasRemoved);
+    Assert(WasRemoved);
     return WasRemoved;
     
 }
@@ -510,18 +536,15 @@ internal inline b32 RemoveEntity(game_state *GameState, u32 EntityIndex) {
     b32 WasRemoved = false;
     
     if(GameState->EntityCount > 0) {
-        
         entity *EntityA = &GameState->Entities[--GameState->EntityCount];
         entity *EntityB = &GameState->Entities[EntityIndex];
-        *EntityB = *EntityA;
-        EntityB->Index = EntityIndex;
-        // Init Entity clears it as well. So probably don't need. 
-        *EntityA = {}; 
-        //
         
 #if INTERNAL_BUILD
-        //RemoveEntityUIElement(GameState->UIState, EntityB);
+        RemoveEntityUIElement(GameState->UIState, EntityB, GameState);
 #endif
+        *EntityB = *EntityA;
+        EntityB->Index = EntityIndex;
+        *EntityA = {}; 
         
         WasRemoved = true;
         

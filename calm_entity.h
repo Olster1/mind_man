@@ -88,7 +88,6 @@ struct entity {
     r32 FacingDirection;    
     
     b32 TriggerAction;
-    b32 IsInteractable;
     entity_type Type;
     b32 Moves;
     

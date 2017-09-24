@@ -7,7 +7,7 @@
    ======================================================================== */
 
 #define WRITE_FONT_FILE 0
-#define SWAP_BUFFER_INTERVAL 1
+#define SWAP_BUFFER_INTERVAL 2
 
 #include <windows.h>
 #include <stdio.h>
@@ -31,6 +31,9 @@ global_variable LPDIRECTSOUNDBUFFER GlobalSoundBuffer;
 global_variable GLuint GlobalOpenGlDefaultInternalTextureFormat;
 
 #include "calm_opengl.cpp"
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ASSERT(x) Assert(x)
+#include "stb_image.h"
 #include "calm_game.cpp"
 
 typedef BOOL WINAPI wgl_swap_interval_ext(int interval);
@@ -1069,7 +1072,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                         GameSoundBuffer.SamplesPerSecond = SoundInfo.SamplesPerSec;
                         GameSoundBuffer.ChannelCount = SoundInfo.NumberOfChannels;
                         
-#if 1
+#if 0
                         GameWriteAudioSamples(&GameMemory, &GameSoundBuffer);
                         Win32WriteAudioSamplesToBuffer(GlobalSoundBuffer, AudioSamples,
                                                        SoundInfo.BufferByteAt,

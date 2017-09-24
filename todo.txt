@@ -1,6 +1,6 @@
 PROGRAMMING:
-Entities have ids instead of pointers and indexes! 
-Store Chunktypes entities can walk on in text file.  
+Entities have ids instead of pointers and indexes!  mmm...
+
 
 ART: 
 Takes pictures of grant's castles and put in game

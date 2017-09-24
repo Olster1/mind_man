@@ -103,7 +103,10 @@ struct v2i
 #define fori_count(Count) for(u32 Index = 0; Index < Count; ++Index)
 
 #define forN_(Count, Name) for(u32 Name = 0; Name < Count; Name++)
+#define forN_s(Count, Name) for(s32 Name = 0; Name < Count; Name++)
 #define forN(Count) forN_(Count, ##Count##Index)
+#define forNs(Count) forN_s(Count, ##Count##Index)
+
 
 
 #if INTERNAL_BUILD
@@ -119,6 +122,9 @@ struct v2i
 #include "calm_intrinsics.h"
 #include "calm_math.h"
 #include "calm_print.cpp"
+
+#define CastAs(type, value) (*((type *)&value))
+#define CastVoidAs(type, value) (*((type *)value))
 
 inline b32 IsWhiteSpace(char Char) {
     b32 Result = (Char == ' ' || Char == '\n' || Char == '\r');

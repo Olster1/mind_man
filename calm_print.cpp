@@ -105,6 +105,7 @@
  
  
 #define Print(Array, ...) Print_(Array, sizeof(Array), ##__VA_ARGS__);
+#define PrintS(Array, Size, ...) Print_(Array, Size, ##__VA_ARGS__);
  
  inline char *PrintString(char *TextBuffer, u32 TextBufferSize, char *String) {
      u32 StringLength = 0;
