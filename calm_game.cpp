@@ -13,76 +13,9 @@
 #include "calm_console.cpp"
 #include "calm_ui.cpp"
 #include "calm_entity.cpp"
+#include "calm_animation.cpp"
 #include "calm_meta.h"
 #include "meta_enum_arrays.h"
-
-internal void InitAnimation(animation *Animation, game_memory *Memory,  char **FileNames, u32 FileNameCount, r32 DirectionValue, char *Name) {
-    //Animation->Qualities[POSE] = PoseValue;
-    Animation->Qualities[DIRECTION] = DirectionValue;
-    Animation->Name = Name;
-    
-    for(u32 i = 0; i < FileNameCount; ++i) {
-        Animation->Frames[Animation->FrameCount++] = LoadBitmap(Memory, 0, FileNames[i]);
-    }
-}
-
-internal void ExtractBitmaps(memory_arena *MemoryArena, s32 TotalWidth, s32 TotalHeight, s32 XOffset, s32 YOffset) {
-    
-    //CreateNewBitmap(MemoryArena, u32 Width, u32 Height, false)
-    
-}
-
-static quality_info QualityInfo[ANIMATE_QUALITY_COUNT] = {{2*PI32, true}};
-
-internal animation *GetAnimation(animation *Animations, u32 AnimationsCount, char *Name) {
-    animation *Result = 0;
-    forN(AnimationsCount) {
-        animation *Anim = Animations + AnimationsCountIndex;
-        if(Anim->Name == Name) {
-            Result = Anim;
-            break;
-        }
-    }
-    
-    return Result;
-}
-
-internal animation *GetAnimation(animation *Animations, u32 AnimationsCount,  r32 *Qualities,
-                                 r32 *Weights) {
-    animation *BestResult = 0;
-    r32 BestValue = 100000.0f;
-    forN(AnimationsCount) {
-        animation *Anim = Animations + AnimationsCountIndex;
-        r32 ThisValue = 0;
-        for(u32 i = 0; i < ANIMATE_QUALITY_COUNT; ++i) {
-            r32 Value = Qualities[i];
-            r32 TestValue = Anim->Qualities[i];
-            quality_info Info= QualityInfo[i];
-            
-            r32 DifferenceSqr = Sqr(TestValue - Value);
-            if(Info.IsPeriodic) {
-                if(DifferenceSqr > Sqr(Info.MaxValue/2)) {
-                    r32 Min = TestValue;
-                    r32 Max = Value;
-                    if(Max < Min) {
-                        Min = Value;
-                        Max = TestValue;
-                    }
-                    Min += Info.MaxValue/2;
-                    DifferenceSqr = Sqr(Max - Min);
-                }
-            }
-            ThisValue += Weights[i]*(DifferenceSqr / Info.MaxValue);
-        }
-        if(ThisValue < BestValue) {
-            BestResult = Anim;
-            BestValue = ThisValue;
-        }
-    }
-    
-    Assert(BestResult);
-    return BestResult;
-}
 
 #define GetChunkHash(X, Y) (Abs(X*19 + Y*23) % WORLD_CHUNK_HASH_SIZE)
 internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena, chunk_type Type, world_chunk **FreeListPtr = 0) {
@@ -1014,9 +947,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
 {
     game_state *GameState = (game_state *)Memory->GameStorage;
     r32 MetersToPixels = 60.0f;
+    entity *Player = 0;
     if(!GameState->IsInitialized)
     {
-        
+        //for stb_image so the images aren't upside down.
+        stbi_set_flip_vertically_on_load(true);
+        //
         InitializeMemoryArena(&GameState->MemoryArena, (u8 *)Memory->GameStorage + sizeof(game_state), Memory->GameStorageSize - sizeof(game_state));
         
         GameState->PerFrameArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
@@ -1024,6 +960,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->ScratchPad = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
         
         GameState->RenderArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
+        
+        GameState->StringArena = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
         
         GameState->UIState = PushStruct(&GameState->MemoryArena, ui_state);
         
@@ -1044,8 +982,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
 #endif
         GameState->MagicianHandBitmap = LoadBitmap(Memory, 0, "magician_hand.bmp");
         
-        GameState->Test = LoadImage(&GameState->MemoryArena, "magician_hand.bmp");
-        
         GameState->DarkTiles[NULL_TILE] = LoadBitmap(Memory, 0, "static_center.bmp");
         
         GameState->DarkTiles[TOP_LEFT_TILE] = LoadBitmap(Memory, 0, "static_left.bmp");
@@ -1060,34 +996,76 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->DarkTiles[BOTTOM_CENTER_TILE] = LoadBitmap(Memory, 0, "static_bottom.bmp");
         GameState->DarkTiles[BOTTOM_RIGHT_TILE] = LoadBitmap(Memory, 0, "static_right.bmp");
         
-        //GameState->Lamp = LoadBitmap(Memory, 0, "crate.bmp");
-        GameState->Lamp = LoadImage(&GameState->MemoryArena, "crate.png");
+        GameState->Crate = LoadBitmap(Memory, 0, "crate.bmp ");
         GameState->Water = LoadBitmap(Memory, 0, "water3.bmp");
         GameState->Desert = LoadBitmap(Memory, 0, "desert.bmp");
         
-        GameState->LanternAnimationCount = 0;
         
-        char *FileNames[16] = {"lantern_man/lm_run_left_l.bmp",
-            "lantern_man/lm_run_left_r.bmp"};
         
-        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 2, PI32, "LaternMan_RunLeft");
+        GameState->KnightAnimationCount = 0;
         
-        FileNames[0] = "lantern_man/lm_stand_left.bmp";
+        char *BaseName = "knight/knight iso char_";
+        //char *BaseName = "knight iso char_";
         
-        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, PI32, "LanternMan_IdleLeft");
+#define CREATE_NAME(Append) CREATE_NAME_(Append##.png)
+#define CREATE_NAME_(Append) CREATE_NAME__(#Append)
+#define CREATE_NAME__(Append) Concat(&GameState->StringArena, BaseName, Append)
+        {
+            char *FileNames[] = {
+                CREATE_NAME(idle_0),
+                CREATE_NAME(idle_1),
+                CREATE_NAME(idle_2),
+                CREATE_NAME(idle_3),
+            };
+            InitAnimation(&GameState->KnightAnimations[GameState->KnightAnimationCount++], Memory, FileNames, ArrayCount(FileNames), 0.75f*TAU32, "Knight_Idle", &GameState->MemoryArena);
+        }
         
-        FileNames[0] = "lantern_man/lm_run_right_l.bmp";
-        FileNames[1] = "lantern_man/lm_run_right_r.bmp";
-        
-        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 2, 0, "LanternMan_RunRight");
-        
-        FileNames[0] = "lantern_man/lm_stand_right.bmp";
-        
-        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, 0, "LanternMan_IdleRight");
-        
-        FileNames[0] = "lantern_man/lm_front.bmp";
-        
-        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, PI32*1.5f, "LanternMan_IdleFront");
+        {
+            char *FileNames[] = {
+                CREATE_NAME(run down_0),
+                CREATE_NAME(run down_1),
+                CREATE_NAME(run down_2),
+                CREATE_NAME(run down_3),
+                CREATE_NAME(run down_4)
+            };
+            
+            InitAnimation(&GameState->KnightAnimations[GameState->KnightAnimationCount++], Memory, FileNames, ArrayCount(FileNames), 0.75f*TAU32, "Knight_Run_Down", &GameState->MemoryArena);
+        }
+        {
+            char *FileNames[] = {
+                CREATE_NAME(run up_0),
+                CREATE_NAME(run up_1),
+                CREATE_NAME(run up_2),
+                CREATE_NAME(run up_3),
+                CREATE_NAME(run up_4),
+            };
+            
+            InitAnimation(&GameState->KnightAnimations[GameState->KnightAnimationCount++], Memory, FileNames, ArrayCount(FileNames), 0.25f*TAU32, "Knight_Run_Up", &GameState->MemoryArena);
+        }
+        {
+            char *FileNames[] = {
+                CREATE_NAME(run left_0),
+                CREATE_NAME(run left_1),
+                CREATE_NAME(run left_2),
+                CREATE_NAME(run left_3),
+                CREATE_NAME(run left_4),
+                CREATE_NAME(run left_5),
+            };
+            
+            InitAnimation(&GameState->KnightAnimations[GameState->KnightAnimationCount++], Memory, FileNames, ArrayCount(FileNames), 0.5f*TAU32, "Knight_Run_Left", &GameState->MemoryArena);
+        }
+        {
+            char *FileNames[] = {
+                CREATE_NAME(run right_0),
+                CREATE_NAME(run right_1),
+                CREATE_NAME(run right_2),
+                CREATE_NAME(run right_3),
+                CREATE_NAME(run right_4),
+                CREATE_NAME(run right_5),
+            };
+            
+            InitAnimation(&GameState->KnightAnimations[GameState->KnightAnimationCount++], Memory, FileNames, ArrayCount(FileNames), 0*TAU32, "Knight_Run_Right", &GameState->MemoryArena);
+        }
         
         GameState->GameMode = PLAY_MODE;
         
@@ -1108,11 +1086,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->PauseMenu.Font = GameState->GameFont;
         GameState->GameOverMenu.Timer.Period = 2.0f;
         GameState->GameOverMenu.Font = GameState->GameFont;
-        
-        GameState->FramePeriod = 0.2f;
-        GameState->FrameIndex = 0;
-        GameState->FrameTime = 0;
-        GameState->CurrentAnimation = &GameState->LanternManAnimations[0];
         
         // NOTE(OLIVER): Create Board
         
@@ -1176,6 +1149,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         PopUIElement(GameState->UIState);
 #endif
         GameState->IsInitialized = true;
+        
+        Player = FindFirstEntityOfType(GameState, Entity_Player);
+        
+        
+        AddAnimationToList(GameState, &GameState->MemoryArena, Player, FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, "Knight_Idle"));
+        
     }
     EmptyMemoryArena(&GameState->RenderArena);
     InitRenderGroup(OrthoRenderGroup, Buffer, &GameState->RenderArena, MegaBytes(1), V2(1, 1), V2(0, 0), V2(1, 1));
@@ -1190,7 +1169,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
     
     PushClear(RenderGroup, V4(0.5f, 0.5f, 0.5f, 1)); // TODO(Oliver): I guess it doesn't matter but maybe push this to the ortho group once z-index scheme is in place. 
     
-    entity *Player = FindFirstEntityOfType(GameState, Entity_Player);
+    Player = FindFirstEntityOfType(GameState, Entity_Player);
+    
     
     switch(GameState->GameMode) {
         case MENU_MODE: {
@@ -1440,21 +1420,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
             r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f};
             Qualities[DIRECTION] = (r32)atan2(Player->Velocity.Y, Player->Velocity.X); 
-#if 0
-            animation *NewAnimation = GetAnimation(GameState->LanternManAnimations, GameState->LanternAnimationCount, Qualities, Weights);
-#else 
-            animation *NewAnimation = &GameState->LanternManAnimations[4];
-#endif
-            r32 FastFactor = 1000;
-            GameState->FramePeriod = 0.2f; //FastFactor / LengthSqr(Player->Velocity);
-            // TODO(OLIVER): Make this into a sineous function
-            GameState->FramePeriod = Clamp(0.2f, GameState->FramePeriod, 0.4f);
+#if 1
+            animation *NewAnimation = GetAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, Qualities, Weights);
             
-            Assert(NewAnimation);
-            if(NewAnimation != GameState->CurrentAnimation) {
-                GameState->FrameIndex = 0;
-                GameState->CurrentAnimation = NewAnimation;
-            }
+            AddAnimationToList(GameState, &GameState->MemoryArena, Player, NewAnimation);
+            
+            
+#else 
+            animation *NewAnimation = &GameState->KnightAnimations[4];
+#endif
             
             rect2 BufferRect = Rect2(0, 0, (r32)Buffer->Width, (r32)Buffer->Height);
             
@@ -1581,23 +1555,17 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                     Camera->AccelFromLastFrame = V2(0, 0);
                                 }
                                 /////// NOTE(OLIVER): Player Animation
-                                if(GameState->CurrentAnimation) {
-                                    bitmap CurrentBitmap = GameState->CurrentAnimation->Frames[GameState->FrameIndex];
+                                if(!IsEmpty(&Entity->AnimationListSentintel)) {
+                                    bitmap *CurrentBitmap = GetBitmap(Entity->AnimationListSentintel.Next);
                                     
-                                    GameState->FrameTime += dt;
-                                    if(GameState->FrameTime > GameState->FramePeriod) {
-                                        GameState->FrameTime = 0;
-                                        GameState->FrameIndex++;
-                                        if(GameState->FrameIndex >= GameState->CurrentAnimation->FrameCount) {
-                                            GameState->FrameIndex = 0;
-                                        }
-                                    }
+                                    PushBitmap(RenderGroup, V3(EntityRelP, 1), CurrentBitmap,  WorldChunkInMeters, BufferRect);
+                                    UpdateAnimation(GameState, Entity, dt);
+                                } else {
                                     
-                                    //PushBitmap(RenderGroup, V3(EntityRelP, 1), &CurrentBitmap,  BufferRect);
+                                    PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
                                 }
                             }
                             
-                            PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
                             ///////
                         } break;
                         case Entity_Philosopher: {
@@ -1683,7 +1651,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             
                             //PushRectOutline(RenderGroup, EntityAsRect, 1, V4(0, 0, 0, 1)); 
                             */
-                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Lamp,  0.8f*WorldChunkInMeters, BufferRect);
+                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Crate,  0.8f*WorldChunkInMeters, BufferRect);
                             //This is for the UI level editor
                             if(!IsValidGridPosition(GameState, Entity->Pos)) {
                                 PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 0, 0.4f)); 

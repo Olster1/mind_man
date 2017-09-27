@@ -48,11 +48,9 @@ struct thread_info
 {
     HANDLE Semaphore;
     LPVOID WindowHandle;
-    thread_work WorkQueue[3];
+    thread_work WorkQueue[256];
     volatile u32 IndexToTakeFrom;
     volatile u32 IndexToAddTo;
-    
-    
 };
 
 #define CALM_WIN32_H

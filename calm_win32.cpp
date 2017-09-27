@@ -7,7 +7,7 @@
    ======================================================================== */
 
 #define WRITE_FONT_FILE 0
-#define SWAP_BUFFER_INTERVAL 2
+#define SWAP_BUFFER_INTERVAL 1
 
 #include <windows.h>
 #include <stdio.h>
@@ -31,9 +31,7 @@ global_variable LPDIRECTSOUNDBUFFER GlobalSoundBuffer;
 global_variable GLuint GlobalOpenGlDefaultInternalTextureFormat;
 
 #include "calm_opengl.cpp"
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ASSERT(x) Assert(x)
-#include "stb_image.h"
+
 #include "calm_game.cpp"
 
 typedef BOOL WINAPI wgl_swap_interval_ext(int interval);
@@ -1084,7 +1082,6 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                     }
                     
                     /////////////////////////////////////////////////////////////////////////////
-#define SLEEP 1
                     r32 SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
 #if SLEEP
                     
@@ -1108,6 +1105,9 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                     
                     HDC WindowDC = GetDC(WindowHandle);
 #if SOFTWARE_RENDERER
+                    RenderGroupToOutput(&RenderGroup);
+                    RenderGroupToOutput(&OrthoRenderGroup);
+                    
                     Win32BltBitmapToScreen(WindowDC, WindowDim.X, WindowDim.Y);
 #else
                     

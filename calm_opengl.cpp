@@ -28,6 +28,7 @@ struct opengl_info {
     
     b32 GL_ARB_framebuffer_sRGB;
     b32 GL_EXT_texture_sRGB;
+    b32 GL_ARB_texture_non_power_of_two;
 };
 
 inline opengl_info OpenGlGetExtensions(b32 ModernContext) {
@@ -56,6 +57,7 @@ inline opengl_info OpenGlGetExtensions(b32 ModernContext) {
         if(0) {}
         else if(DoStringsMatch("GL_ARB_framebuffer_sRGB", Begin, Length)) { Result.GL_ARB_framebuffer_sRGB = true; }
         else if(DoStringsMatch("GL_EXT_texture_sRGB", Begin, Length)) { Result.GL_EXT_texture_sRGB = true; }
+        else if(DoStringsMatch("GL_ARB_texture_non_power_of_two", Begin, Length)) { Result.GL_ARB_texture_non_power_of_two = true; }
         
         while(IsWhiteSpace(*At)) {
             At++;
@@ -132,8 +134,29 @@ inline void OpenGlSetScreenSpace(s32 Width, s32 Height) {
     glLoadMatrixf(ProjMat);
 }
 
-global_variable u32 TextureHandleIndex = 0;
+global_variable volatile u32 GlobalTextureHandleIndex = 1;
 
+static void OpenGlLoadTexture(bitmap *Bitmap, u32 TextureHandleIndex) {
+    Bitmap->Handle = TextureHandleIndex;
+    
+    Assert(Bitmap->Handle);
+    glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
+    
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP); 
+    
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, GlobalOpenGlDefaultInternalTextureFormat, Bitmap->Width, Bitmap->Height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, Bitmap->Bits);
+}
+
+THREAD_WORK_FUNCTION(OpenGlLoadTextureThreadWork) {
+    bitmap *Bitmap = (bitmap *)Data;
+    u32 TextureHandleIndex = *(((u8 *)Data) + sizeof(bitmap *));
+    OpenGlLoadTexture(Bitmap, TextureHandleIndex);
+}
 
 void OpenGlRenderToOutput(render_group *Group, b32 draw) {
     if(draw) { // NOTE(Oliver): For Debug purposes
@@ -196,24 +219,10 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
                     
                     if(Bitmap->Handle) {
                         glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
-                    } else {
-                        Bitmap->Handle = ++TextureHandleIndex;
                         
-                        glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
-                        
-                        glTexImage2D(GL_TEXTURE_2D, 0, GlobalOpenGlDefaultInternalTextureFormat, Bitmap->Width, Bitmap->Height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, Bitmap->Bits);
-                        
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); 
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); 
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP); 
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP); 
-                        
-                        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
-                        
-                    }
+                        OpenGlDrawRectangle(MinP, MaxP, Info->Color);
+                    } 
                     
-                    
-                    OpenGlDrawRectangle(MinP, MaxP, Info->Color);
                     
                     At += sizeof(render_element_header) + sizeof(render_element_bitmap);
                 } break;

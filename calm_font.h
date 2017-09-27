@@ -216,7 +216,7 @@ inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, r32 
     v2 Scale = V2(1.0f / Transform->Scale.X, 1.0f / Transform->Scale.Y);
     
     r32 XAdvanceForLetter = Scale.X*GetCharacterAdvanceFor(Font, LastCodePoint, CheesePoint);
-    if((XAdvanceForLetter + *XCursor) > Bounds.Max.X || (CheesePoint == '\n' && NewLineSensitive))
+    if((XAdvanceForLetter + *XCursor) >= Bounds.Max.X || (CheesePoint == '\n' && NewLineSensitive))
     {
         *XCursor = Bounds.Min.X;
         *YCursor += GetLineAdvance(Font, Scale.Y, LineAdvanceModifier);

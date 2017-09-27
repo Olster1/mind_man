@@ -155,6 +155,18 @@ V4(r32 X, r32 Y, r32 Z, r32 W)
     return Result;
 }
 
+inline v4
+Vec4(r32 X, r32 Y, r32 Z, r32 W)
+{
+    v4 Result;
+    Result.X = X;
+    Result.Y = Y;
+    Result.Z = Z;
+    Result.W = W;
+    
+    return Result;
+}
+
 inline r32
 SafeRatio0(r32 A, r32 B)
 {
@@ -972,6 +984,22 @@ Union(rect2 A, rect2 B)
     
     return Result;
     
+}
+
+inline rect2 ClipRectangle(rect2 Rect, rect2 ClipRegion) {
+    if(Rect.Min.X < ClipRegion.Min.X) {
+        Rect.Min.X = ClipRegion.Min.X;
+    }
+    if(Rect.Max.X > ClipRegion.Max.X) {
+        Rect.Max.X = ClipRegion.Max.X;
+    }
+    if(Rect.Min.Y < ClipRegion.Min.Y) {
+        Rect.Min.Y = ClipRegion.Min.Y;
+    }
+    if(Rect.Max.Y > ClipRegion.Max.Y) {
+        Rect.Max.Y = ClipRegion.Max.Y;
+    }
+    return Rect;
 }
 
 inline rect2 ClipLeftX(v2 Min, rect2 Rect) {

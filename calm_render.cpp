@@ -146,8 +146,20 @@ struct bitmap_header
 };
 #pragma pack(pop)
 
+inline u32 PackRGBA(v4 Color01) {
+    
+    Color01 = 255.0f * Color01;
+    u32 Result = ((u32)Color01.A << 24 |
+                  (u32)Color01.R << 16 |
+                  (u32)Color01.G << 8 |
+                  (u32)Color01.B << 0
+                  );
+    return Result;
+    
+}
+
 internal bitmap
-CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear)
+CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear, v4 ClearColor)
 {
     bitmap Result;
     
@@ -155,49 +167,14 @@ CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear)
     Result.AlignPercent = V2(0.5f, 0.5f);
     Result.Height = Height;
     Result.Pitch = Width *sizeof(u32);
+    Result.Handle = 0;
     
     u32 MemorySize = Width*Height*sizeof(u32);
-    Result.Bits = PushArray(Arena, u32, Width*Height);
+    Result.Bits = PushSize(Arena, MemorySize);
     
-    if(Clear)
-    {
-        ClearMemory(Result.Bits, MemorySize);
+    if(Clear) {
+        ClearMemoryU32(Result.Bits, Width*Height, PackRGBA(ClearColor));
     }
-    
-    return Result;
-}
-
-internal bitmap LoadImage(memory_arena *Arena, char *Filename) {
-    int x,y,n;
-    unsigned char *data = stbi_load(Filename, &x, &y, &n, STBI_rgb_alpha);
-    
-    bitmap
-        Result = CreateNewBitmap(Arena, x, y, false);
-    
-#define ExtractBits(Pointer, Shift) (u32)((*Pointer >> Shift) & 0xff)
-    
-    u32 *Src = (u32 *)data;
-    u32 *Dest = (u32 *)Result.Bits;
-    forNs(y) {
-        forNs(x) {
-            u32 B = ExtractBits(Src, 0);
-            u32 G = ExtractBits(Src, 8);
-            u32 R = ExtractBits(Src, 16);
-            u32 A = ExtractBits(Src, 24);
-            
-            u32 Color = (A << 24 |
-                         R << 0 |
-                         G << 8 |
-                         B << 16);
-            
-            //Assert(Color == *Src);
-            *Dest = Color;
-            Dest++;
-            Src++;
-        }
-    }
-    
-    stbi_image_free(data);
     
     return Result;
 }
@@ -219,6 +196,7 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
         Result.Height = BitmapHeader->Height;
         Result.Pitch = BitmapHeader->Width * sizeof(u32);
         Result.AlignPercent = AlignPercent;
+        Result.Handle = 0;
         
         Result.Bits = (void *)((u8 *)BitmapHeader + BitmapHeader->DataOffsetIntoFile);
         
@@ -262,15 +240,70 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
     
 }
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ASSERT(x) Assert(x)
+#include "stb_image.h"
+
+#if 1
+//#define ExtractBits(Pointer, Shift) (u32)((*Pointer >> Shift) & 0xff)
+internal bitmap LoadImage(game_memory *Memory, memory_arena *Arena, char *Filename) {
+    int x,y,n;
+    char *data = (char *)stbi_load(Filename, &x, &y, &n, 4);
+    
+    Assert(x != 0 && y != 0);
+    Assert(n == 4);
+    
+    bitmap Result = CreateNewBitmap(Arena, x, y, true, V4(1, 0, 1, 1));
+    //bitmap Result = LoadBitmap(Memory, Arena, Filename);
+    
+    
+    u32 *Src = (u32 *)data;
+    u32 *Dest = (u32 *)Result.Bits;
+    
+    //Result.Bits = data;
+    /* We could use SIMD for this (practice?), but probably in the shipping game, this will all be done offline in the asset packer*/
+#if 1
+    for(s32 i = 0; i < y; ++i){
+        for(s32 j = 0; j < x; ++j) {
+            u32 B = (u32)((*Src) >> 0 & 0xff);
+            u32 G = (u32)((*Src) >> 8 & 0xff);
+            u32 R = (u32)((*Src) >> 16 & 0xff);
+            u32 A = (u32)((*Src) >> 24 & 0xff);
+            
+            u32 Color = (A << 24 |
+                         R << 0 |
+                         G << 8 |
+                         B << 16);
+            
+            //Assert(Color == *Src);
+            *Dest = Color;
+            Dest++;
+            Src++;
+        }
+    }
+    
+    Assert(data != Result.Bits);
+#endif
+    stbi_image_free(data);
+    
+    
+    return Result;
+}
+#endif 
+
 internal void
 DrawBitmap(bitmap *Buffer, bitmap *Bitmap, s32 XOrigin_, s32 YOrigin_, rect2 Bounds, v4 Color = V4(1, 1, 1, 1))
 {
     if(Bitmap) {
         
-        // TODO(OLIVER): This needs fixing for clip space
-        Bounds = Rect2(Max(Bounds.Min.X, 0), Max(Bounds.Min.Y, 0), Min(Bounds.Max.X, Buffer->Width), Min(Bounds.Max.Y, Buffer->Height));
-        ///////
+        Bounds = ClipRectangle(Bounds, Rect2(0, 0, (r32)Buffer->Width - 1, (r32)Buffer->Height - 1));
+        Bounds = Rect2(0, 0, (r32)Buffer->Width - 1, (r32)Buffer->Height - 1);
         
+        /*
+        // TODO(OLIVER): This needs fixing for clip space
+        Bounds = Rect2(Max(Bounds.Min.X, 0), Max(Bounds.Min.Y, 0), Min(Bounds.Max.X, Buffer->Width - 1), Min(Bounds.Max.Y, Buffer->Height - 1));
+        ///////
+        */
         r32 Inv_255 = 1.0f / 255.0f;
         
         s32 XOrigin = XOrigin_ - (s32)(Bitmap->AlignPercent.X*Bitmap->Width);
@@ -535,20 +568,28 @@ inline void PushRectCenterOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4
 }
 
 void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpace,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
-    render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
     
-    Header->Type = render_bitmap;
-    render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
-    
-    
-    Info->Bitmap = Bitmap;
-    Info->ClipRect = ClipRect;
-    Info->Color = Color;
-    r32 WidthToHeightRatio = SafeRatio0((r32)Bitmap->Height, (r32)Bitmap->Width); 
-    r32 HeightInWorldSpace = WidthToHeightRatio*WidthInWorldSpace;
-    Info->Dim = Scale(&Group->Transform, V2(WidthInWorldSpace, HeightInWorldSpace));
-    Info->Pos = Transform(&Group->Transform, Pos.XY) - Hadamard(Bitmap->AlignPercent, Info->Dim);
-    Info->ZDepth = Pos.Z;
+    if(!Bitmap->Handle) {
+        //Push work on then release temp memory, check first for a memory chunk. 
+        ///PushSize(&Group->ThreadWorkArena, sizeof(bitmap *) + sizeof(u32));
+        //u8 *
+        //GlLoadTextureThreadWork();
+    } else {
+        render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
+        
+        
+        Header->Type = render_bitmap;
+        render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
+        
+        Info->Bitmap = Bitmap;
+        Info->ClipRect = ClipRect;
+        Info->Color = Color;
+        r32 WidthToHeightRatio = SafeRatio0((r32)Bitmap->Height, (r32)Bitmap->Width); 
+        r32 HeightInWorldSpace = WidthToHeightRatio*WidthInWorldSpace;
+        Info->Dim = Scale(&Group->Transform, V2(WidthInWorldSpace, HeightInWorldSpace));
+        Info->Pos = Transform(&Group->Transform, Pos.XY) - Hadamard(Bitmap->AlignPercent, Info->Dim);
+        Info->ZDepth = Pos.Z;
+    }
 }
 
 

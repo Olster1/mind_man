@@ -48,17 +48,6 @@ inline b32 InArray(u32 *Array, u32 ArrayCount, u32 Value) {
 }
 
 
-internal u32 StringLength(char *A) {
-    u32 Result = 0;
-    
-    while (*A++)
-    {
-        Result++;
-    }
-    
-    return Result;
-}
-
 #define MoveToList(LinkPtr, FreeList, type) type *Next = (*LinkPtr)->Next; (*LinkPtr)->Next = FreeList; FreeList = *LinkPtr; *LinkPtr = Next;
 
 #define GetStringSizeFromChar(At, Start) (u32)((intptr)At - (intptr)Start)
@@ -100,6 +89,7 @@ enum chunk_type {
 #include "calm_console.h"
 #include "calm_sound.h"
 #include "calm_particles.h"
+#include "calm_animation.h"
 #include "calm_entity.h"
 #include "calm_menu.h"
 
@@ -109,23 +99,6 @@ enum game_mode {
     GAMEOVER_MODE,
     WIN_MODE,
     MENU_MODE,
-};
-
-struct quality_info {
-    r32 MaxValue;
-    b32 IsPeriodic;
-};
-
-enum animation_qualities {
-    DIRECTION,
-    ANIMATE_QUALITY_COUNT
-};
-
-struct animation {
-    bitmap Frames[32];
-    u32 FrameCount;
-    r32 Qualities[ANIMATE_QUALITY_COUNT];
-    char *Name;
 };
 
 static r32 WorldChunkInMeters = 1.0f;
@@ -172,9 +145,12 @@ struct game_state
     memory_arena PerFrameArena;
     memory_arena ScratchPad;
     memory_arena RenderArena;
+    memory_arena StringArena;
     
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;
+    
+    animation_list_item *AnimationItemFreeList;
     
     //These should never move i.e. we should never get a null pointer. Maybe we could change all entity pointers to an ID and we look up that ID instead of getting dangling pointer...//
     
@@ -221,8 +197,7 @@ struct game_state
     bitmap FootPrint;
     bitmap Desert;
     bitmap Water;
-    bitmap Lamp;
-    bitmap Test;
+    bitmap Crate;
     
     u32 FootPrintCount;
     u32 FootPrintIndex;
@@ -234,13 +209,8 @@ struct game_state
     menu PauseMenu;
     menu GameOverMenu;
     
-    animation *CurrentAnimation;
-    u32 FrameIndex;
-    r32 FramePeriod;
-    r32 FrameTime;
-    
-    u32 LanternAnimationCount;
-    animation LanternManAnimations[16];
+    u32 KnightAnimationCount;
+    animation KnightAnimations[16];
     
     random_series GeneralEntropy;
     

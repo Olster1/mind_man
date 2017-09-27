@@ -466,6 +466,9 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID) {
     Entity->ChunkTimer = {};
     Entity->ChunkTimer.Period = 1.0f;
     
+    Entity->AnimationListSentintel = {}; 
+    Entity->AnimationListSentintel.Next = Entity->AnimationListSentintel.Prev = &Entity->AnimationListSentintel; 
+    
     //Entity->LastMoves;
     Entity->LastMoveAt = 0;
     Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion

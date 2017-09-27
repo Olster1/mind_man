@@ -69,6 +69,8 @@ struct entity {
     v2i LastSearchPos;
     //
     
+    animation_list_item AnimationListSentintel;
+    
     u32 VectorIndexAt;
     u32 ChunkTypeCount;
     chunk_type ValidChunkTypes[16];

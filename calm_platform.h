@@ -118,6 +118,12 @@ struct v2i
 #define InvalidCodePath Assert(!"Invalid Code Path");
 
 #define SOFTWARE_RENDERER 0
+#define SLEEP 0
+#if SOFTWARE_RENDERER
+#undef SLEEP
+#define SLEEP 1
+#endif
+
 
 #include "calm_intrinsics.h"
 #include "calm_math.h"
@@ -165,14 +171,26 @@ typedef PLATFORM_WRITE_FILE(platform_write_file);
 typedef PLATFORM_FILE_SIZE(platform_file_size);
 
 inline void
-ClearMemory(void *Memory, u32 Size)
+ClearMemory(void *Memory, u32 Size, u8 ClearValue = 0)
 {
     
     u8 *At = (u8 *)Memory;
     
     while(Size--)
     {
-        *At++ = 0;
+        *At++ = ClearValue;
+    }
+}
+
+inline void
+ClearMemoryU32(void *Memory, u32 Size, u32 ClearValue)
+{
+    
+    u32 *At = (u32 *)Memory;
+    
+    while(Size--)
+    {
+        *At++ = ClearValue;
     }
 }
 
@@ -359,6 +377,16 @@ inline memory_arena SubMemoryArena(memory_arena *Arena, size_t Size) {
     return Result;
 }
 
+internal u32 StringLength(char *A) {
+    u32 Result = 0;
+    
+    while (*A++)
+    {
+        Result++;
+    }
+    
+    return Result;
+}
 
 inline b32
 DoStringsMatch(char *A, char *B)
@@ -411,6 +439,31 @@ EmptyMemoryArena(memory_arena *Arena) {
     Arena->CurrentSize = 0;
 }
 
+inline char *Concat(memory_arena *Arena, char *A, char *B) {
+    s32 Size = StringLength(A) + StringLength(B) + 1; //plus one for null terminated
+    char *Data = (char *)PushSize(Arena, Size);
+    char *DataAt = Data;
+    while(*A) {
+        *DataAt++ = *A++;
+    }
+    while(*B) {
+        *DataAt++ = *B++;
+    }
+    
+    *DataAt++ = '\0';
+    
+    Assert((DataAt - Data) == Size);
+    
+    return Data;
+}
+
+inline char *Concat(memory_arena *Arena, char *A, char *B, char *C) {
+    char *AB = Concat(Arena, A, B);
+    char *ABC = Concat(Arena, AB, C);
+    return ABC;
+    
+    
+}
 
 #define CALM_PLATFORM_H
 #endif
