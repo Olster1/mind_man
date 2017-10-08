@@ -57,6 +57,7 @@ struct transform {
     v2 Offset;
 };
 
+struct game_state;
 struct render_group
 {
     v2 ScreenDim;
@@ -67,6 +68,11 @@ struct render_group
     
     temp_memory TempMem;
     memory_arena Arena;
+    
+    thread_info *ThreadInfo;
+    
+    game_state *GameState; 
+    game_memory *Memory;
     
 };
 

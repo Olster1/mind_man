@@ -6,8 +6,26 @@
    $Creator: Oliver Marsh $
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
+
 /*
-// TODO(OLIVER): 
+  //\\//\\//\\
+GAME PROGRAMMING:
+-- Generic tile type for entities to say other things can't move here for other entities etc. 
+-- Bug on chunk Main type
+-- doors open once finished sound puzzle
+
+ENGINE PROGRAMMING: 
+-- more comprhensive tile renderer - find tile set with 1 across tiles. 
+-- Entity selection not offset
+-- Text doesn't wrap around on ui buttons (clips to parent)
+-- Port audio from Faro engine
+-- Push Pop matrix scheme
+-- Find out why it lags ... texture uploading problem? -> watch HMH 
+
+ART: 
+-- Find more animations - decide on top down or isometric. 
+-- add sound effects and 
+
 
 */
 #include <stdint.h>
@@ -106,7 +124,7 @@ struct v2i
 #define forN_s(Count, Name) for(s32 Name = 0; Name < Count; Name++)
 #define forN(Count) forN_(Count, ##Count##Index)
 #define forNs(Count) forN_s(Count, ##Count##Index)
-
+#define Flip(Value) Value = !Value
 
 
 #if INTERNAL_BUILD
@@ -169,6 +187,30 @@ typedef PLATFORM_WRITE_FILE(platform_write_file);
 
 #define PLATFORM_FILE_SIZE(name) size_t name(char *FileName)
 typedef PLATFORM_FILE_SIZE(platform_file_size);
+
+#define THREAD_WORK_FUNCTION(name) void name(void *Data)
+typedef THREAD_WORK_FUNCTION(thread_work_function);
+
+struct thread_work
+{
+    thread_work_function *FunctionPtr;
+    void *Data;
+    b32 Finished;
+};
+
+struct thread_info
+{
+    HANDLE Semaphore;
+    LPVOID WindowHandle;
+    thread_work WorkQueue[256];
+    volatile u32 IndexToTakeFrom;
+    volatile u32 IndexToAddTo;
+    HGLRC ContextForThread;
+    HDC WindowDC;
+};
+
+#define PLATFORM_PUSH_WORK_ONTO_QUEUE(name) void name(thread_info *Info, thread_work_function *WorkFunction, void *Data)
+typedef PLATFORM_PUSH_WORK_ONTO_QUEUE(platform_push_work_onto_queue);
 
 inline void
 ClearMemory(void *Memory, u32 Size, u8 ClearValue = 0)
@@ -243,6 +285,12 @@ CopyStringToBuffer(char *Buffer, u32 BufferSize, char *StringToCopy)
     *BufferAt = 0;
 }
 
+enum resource_load_state {
+    RESOURCE_NOT_LOADED,
+    RESOURCE_LOADING,
+    RESOURCE_LOADED,
+};
+
 struct bitmap
 {
     u32 Width;
@@ -253,6 +301,7 @@ struct bitmap
     
     void *Bits;
     
+    resource_load_state LoadState;
 };
 
 #define WasPressed(button_input) (button_input.IsDown && button_input.FrameCount > 0)
@@ -290,6 +339,9 @@ struct game_memory
     platform_begin_file *PlatformBeginFile;
     platform_begin_file_write *PlatformBeginFileWrite;
     platform_end_file *PlatformEndFile;
+    platform_push_work_onto_queue *PlatformPushWorkOntoQueue;
+    
+    thread_info *ThreadInfo;
     
     r32 MouseX;
     r32 MouseY;

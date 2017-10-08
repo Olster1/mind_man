@@ -10,7 +10,8 @@ enum entity_type
     Entity_Camera,
     Entity_Dropper,
     Entity_Home,
-    
+    Entity_Door,
+    Entity_CheckPoint,
     ///////
     Entity_Count,
 };
@@ -62,6 +63,11 @@ struct entity {
     //
     r32 Time;
     //particle_system ParticleSystem;
+    
+    // NOTE(OLIVER): this is for the philosophers checkpoints
+    u32 CheckPointParentAt;
+    u32 CheckPointAt;
+    //
     
     // NOTE(OLIVER): This is for the philosopher AI random walk
     v2i LastMoves[1];

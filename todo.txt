@@ -1,6 +1,6 @@
 PROGRAMMING:
-Entities have ids instead of pointers and indexes!  mmm...
-
+-- Generic tile type for entities to say other things can't move here for other entities etc. 
+-- W
 
 ART: 
 Takes pictures of grant's castles and put in game

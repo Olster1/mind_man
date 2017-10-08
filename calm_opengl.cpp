@@ -134,13 +134,18 @@ inline void OpenGlSetScreenSpace(s32 Width, s32 Height) {
     glLoadMatrixf(ProjMat);
 }
 
-global_variable volatile u32 GlobalTextureHandleIndex = 1;
+
+
+struct render_load_texture_info {
+    bitmap *Bitmap;
+    temp_memory MemoryMark;
+};
 
 static void OpenGlLoadTexture(bitmap *Bitmap, u32 TextureHandleIndex) {
-    Bitmap->Handle = TextureHandleIndex;
     
-    Assert(Bitmap->Handle);
-    glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
+    Assert(!Bitmap->Handle);
+    Assert(Bitmap->LoadState == RESOURCE_LOADING);
+    glBindTexture(GL_TEXTURE_2D, TextureHandleIndex); 
     
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); 
@@ -150,12 +155,25 @@ static void OpenGlLoadTexture(bitmap *Bitmap, u32 TextureHandleIndex) {
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
     
     glTexImage2D(GL_TEXTURE_2D, 0, GlobalOpenGlDefaultInternalTextureFormat, Bitmap->Width, Bitmap->Height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, Bitmap->Bits);
+    
+    MemoryBarrier();
+    _ReadWriteBarrier();
+    
+    Bitmap->Handle = TextureHandleIndex;
+    Bitmap->LoadState = RESOURCE_LOADED;
 }
 
 THREAD_WORK_FUNCTION(OpenGlLoadTextureThreadWork) {
-    bitmap *Bitmap = (bitmap *)Data;
-    u32 TextureHandleIndex = *(((u8 *)Data) + sizeof(bitmap *));
-    OpenGlLoadTexture(Bitmap, TextureHandleIndex);
+    render_load_texture_info *Info = (render_load_texture_info *)Data;
+    Assert(Info->Bitmap->LoadState == RESOURCE_LOADING);
+    GLuint TextureHandle;
+    glGenTextures(1, &TextureHandle);
+    OpenGlLoadTexture(Info->Bitmap, TextureHandle);
+    
+    MemoryBarrier();
+    _ReadWriteBarrier();
+    
+    ReleaseMemory(&Info->MemoryMark);
 }
 
 void OpenGlRenderToOutput(render_group *Group, b32 draw) {
@@ -214,10 +232,10 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
                     bitmap *Bitmap = Info->Bitmap;
                     
                     v2 MinP = Info->Pos;
-                    v2 MaxP = MinP + Info->Dim; //V2i(Bitmap->Width, Bitmap->Height);
+                    v2 MaxP = MinP + Info->Dim; 
                     
-                    
-                    if(Bitmap->Handle) {
+                    if(Bitmap->LoadState == RESOURCE_LOADED) {
+                        Assert(Bitmap->Handle);
                         glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
                         
                         OpenGlDrawRectangle(MinP, MaxP, Info->Color);

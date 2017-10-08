@@ -158,16 +158,21 @@ inline u32 PackRGBA(v4 Color01) {
     
 }
 
+inline void InitBitmap(bitmap *Bitmap, s32 Width, s32 Height, s32 SizeOfPixel, v2 AlignPercent) {
+    Bitmap->Width = Width;
+    Bitmap->Height = Height;
+    Bitmap->Pitch = Width * SizeOfPixel;
+    Bitmap->AlignPercent = AlignPercent;
+    Bitmap->Handle = 0;
+    Bitmap->LoadState = RESOURCE_NOT_LOADED;
+}
+
 internal bitmap
 CreateNewBitmap(memory_arena *Arena, u32 Width, u32 Height, b32 Clear, v4 ClearColor)
 {
     bitmap Result;
     
-    Result.Width = Width;
-    Result.AlignPercent = V2(0.5f, 0.5f);
-    Result.Height = Height;
-    Result.Pitch = Width *sizeof(u32);
-    Result.Handle = 0;
+    InitBitmap(&Result, Width, Height, sizeof(u32), V2(0.5f, 0.5f));
     
     u32 MemorySize = Width*Height*sizeof(u32);
     Result.Bits = PushSize(Arena, MemorySize);
@@ -192,11 +197,7 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
         Assert(BitmapHeader->BitsPerPixel == 8 || BitmapHeader->BitsPerPixel == 32);
         Assert(BitmapHeader->Compression == 0);
         
-        Result.Width = BitmapHeader->Width;
-        Result.Height = BitmapHeader->Height;
-        Result.Pitch = BitmapHeader->Width * sizeof(u32);
-        Result.AlignPercent = AlignPercent;
-        Result.Handle = 0;
+        InitBitmap(&Result, BitmapHeader->Width, BitmapHeader->Height, sizeof(u32), AlignPercent);
         
         Result.Bits = (void *)((u8 *)BitmapHeader + BitmapHeader->DataOffsetIntoFile);
         
@@ -246,16 +247,16 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
 
 #if 1
 //#define ExtractBits(Pointer, Shift) (u32)((*Pointer >> Shift) & 0xff)
-internal bitmap LoadImage(game_memory *Memory, memory_arena *Arena, char *Filename) {
+internal bitmap LoadImage(game_memory *Memory, memory_arena *Arena, char *Filename, v2 AlignPercent) {
     int x,y,n;
     char *data = (char *)stbi_load(Filename, &x, &y, &n, 4);
     
     Assert(x != 0 && y != 0);
-    Assert(n == 4);
+    //Assert(n == 4);
     
     bitmap Result = CreateNewBitmap(Arena, x, y, true, V4(1, 0, 1, 1));
     //bitmap Result = LoadBitmap(Memory, Arena, Filename);
-    
+    Result.AlignPercent = AlignPercent;
     
     u32 *Src = (u32 *)data;
     u32 *Dest = (u32 *)Result.Bits;
@@ -566,29 +567,57 @@ inline void PushRectCenterOutline(render_group *Group, rect2 Dim, r32 ZDepth, v4
     PushRectOutline(Group, NewDim, ZDepth, Color);
     
 }
-
+//THREAD_WORK_FUNCTION(OpenGlLoadTextureThreadWork);
 void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpace,  rect2 ClipRect, v4 Color = V4(1, 1, 1, 1)) {
     
-    if(!Bitmap->Handle) {
-        //Push work on then release temp memory, check first for a memory chunk. 
-        ///PushSize(&Group->ThreadWorkArena, sizeof(bitmap *) + sizeof(u32));
-        //u8 *
-        //GlLoadTextureThreadWork();
-    } else {
-        render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
-        
-        
-        Header->Type = render_bitmap;
-        render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
-        
-        Info->Bitmap = Bitmap;
-        Info->ClipRect = ClipRect;
-        Info->Color = Color;
-        r32 WidthToHeightRatio = SafeRatio0((r32)Bitmap->Height, (r32)Bitmap->Width); 
-        r32 HeightInWorldSpace = WidthToHeightRatio*WidthInWorldSpace;
-        Info->Dim = Scale(&Group->Transform, V2(WidthInWorldSpace, HeightInWorldSpace));
-        Info->Pos = Transform(&Group->Transform, Pos.XY) - Hadamard(Bitmap->AlignPercent, Info->Dim);
-        Info->ZDepth = Pos.Z;
+    switch(Bitmap->LoadState) {
+        case RESOURCE_NOT_LOADED: {
+            Assert(!Bitmap->Handle);
+            //We are the only ones asking for memory arena. Other threads can release them but can't use them. 
+            game_state *GameState = Group->GameState;
+            memory_arena *Arena = GetThreadMemoryArena(GameState);
+            
+            if(Arena) {
+                Bitmap->LoadState = RESOURCE_LOADING;
+#define LOAD_TEXTURE_ON_SEPERATE_THREAD 1
+#if LOAD_TEXTURE_ON_SEPERATE_THREAD
+                temp_memory TempMem = MarkMemory(Arena);
+                
+                render_load_texture_info *Data = PushStruct(Arena, render_load_texture_info);
+                
+                Data->Bitmap = Bitmap;
+                Data->MemoryMark = TempMem;
+                
+                Group->Memory->PlatformPushWorkOntoQueue(Group->ThreadInfo, OpenGlLoadTextureThreadWork, Data);
+#else 
+                OpenGlLoadTexture(Bitmap, ++GameState->TextureHandleIndex);
+                Bitmap->LoadState = RESOURCE_LOADED;
+#endif
+            }
+        } break;
+        case RESOURCE_LOADING: {
+            //do nothing
+        } break;
+        case RESOURCE_LOADED: {
+            Assert(Bitmap->LoadState == RESOURCE_LOADED);
+            render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
+            
+            
+            Header->Type = render_bitmap;
+            render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);
+            
+            Info->Bitmap = Bitmap;
+            Info->ClipRect = ClipRect;
+            Info->Color = Color;
+            r32 WidthToHeightRatio = SafeRatio0((r32)Bitmap->Height, (r32)Bitmap->Width); 
+            r32 HeightInWorldSpace = WidthToHeightRatio*WidthInWorldSpace;
+            Info->Dim = Scale(&Group->Transform, V2(WidthInWorldSpace, HeightInWorldSpace));
+            Info->Pos = Transform(&Group->Transform, Pos.XY) - Hadamard(Bitmap->AlignPercent, Info->Dim);
+            Info->ZDepth = Pos.Z;
+        } break;
+        default: {
+            InvalidCodePath;
+        }
     }
 }
 
@@ -615,7 +644,8 @@ void PushRectCenter(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
 }
 
 
-internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, v2 Rotation) {
+internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, v2 Rotation, thread_info *ThreadInfo, game_state *State, game_memory *Memory) {
+    *Group = {};
     Group->ScreenDim = V2i(Buffer->Width, Buffer->Height);
     Group->Buffer = Buffer;
     Group->TempMem = MarkMemory(MemoryArena);
@@ -623,6 +653,9 @@ internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *
     Group->Transform.Scale = Scale; 
     Group->Transform.Offset = Offset;
     Group->Transform.Rotation = Rotation;
+    Group->ThreadInfo = ThreadInfo;
+    Group->GameState = State;
+    Group->Memory = Memory;
 }
 
 void RenderGroupToOutput(render_group *Group) {

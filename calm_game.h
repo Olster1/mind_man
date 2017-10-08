@@ -9,7 +9,7 @@
 
 ////////////////Gameplay defines/////////
 #define END_WITH_OFFSET 0
-#define MOVE_DIAGONAL 1
+#define MOVE_DIAGONAL 0
 #define MOVE_VIA_MOUSE 0
 #define PLAYER_MOVE_ACTION IsDown
 #define DEFINE_MOVE_ACTION WasPressed
@@ -79,6 +79,7 @@ enum chunk_type {
     ChunkLight,
     ChunkDark,
     ChunkBlock,
+    ChunkDoor,
     ChunkMain,
     
     ChunkTypeCount
@@ -136,6 +137,16 @@ struct tile_type_layout {
     s32 E[3][3];
 };
 
+struct check_point {
+    b32 IsMusic;
+    v2i Pos;
+};
+
+struct check_point_parent {
+    u32 Count;
+    check_point CheckPoints[16];
+};
+
 #define WORLD_CHUNK_HASH_SIZE 4096
 
 struct ui_state;
@@ -146,6 +157,7 @@ struct game_state
     memory_arena ScratchPad;
     memory_arena RenderArena;
     memory_arena StringArena;
+    memory_arena ThreadArenas[16];
     
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;
@@ -153,6 +165,9 @@ struct game_state
     animation_list_item *AnimationItemFreeList;
     
     //These should never move i.e. we should never get a null pointer. Maybe we could change all entity pointers to an ID and we look up that ID instead of getting dangling pointer...//
+    //DONE!//
+    
+    u32 TextureHandleIndex;
     
     loaded_sound BackgroundMusic;
     loaded_sound FootstepsSound[32];
@@ -198,6 +213,12 @@ struct game_state
     bitmap Desert;
     bitmap Water;
     bitmap Crate;
+    bitmap Door;
+    bitmap Monster;
+    
+    bitmap BackgroundImage;
+    
+    v2 RestartPlayerPosition;
     
     u32 FootPrintCount;
     u32 FootPrintIndex;
@@ -211,6 +232,9 @@ struct game_state
     
     u32 KnightAnimationCount;
     animation KnightAnimations[16];
+    
+    u32 CheckPointCount;
+    check_point_parent CheckPointParents[256];
     
     random_series GeneralEntropy;
     
@@ -228,6 +252,19 @@ struct game_state
     b32 IsInitialized;
     
 };
+
+inline memory_arena *GetThreadMemoryArena(game_state *GameState) {
+    memory_arena *Result = 0;
+    
+    for(u32 i = 0; i < ArrayCount(GameState->ThreadArenas); ++i) {
+        memory_arena *Arena = GameState->ThreadArenas + i;
+        if(Arena->TempMemCount == 0) {
+            Result = Arena;
+        }
+    }
+    
+    return Result;
+} 
 
 inline b32
 InBounds(bitmap *Bitmap, u32 X, u32 Y)

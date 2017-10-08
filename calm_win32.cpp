@@ -32,12 +32,26 @@ global_variable GLuint GlobalOpenGlDefaultInternalTextureFormat;
 
 #include "calm_opengl.cpp"
 
+global_variable int OpenGLAttribs[] = {
+    WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+    WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+    WGL_CONTEXT_FLAGS_ARB, 0 // NOTE(OLIVER): Enable For testing WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB
+#if _INTERNAL
+    |WGL_CONTEXT_DEBUG_BIT_ARB
+#endif
+    ,
+    WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    0
+};
+
 #include "calm_game.cpp"
 
 typedef BOOL WINAPI wgl_swap_interval_ext(int interval);
 global_variable wgl_swap_interval_ext *wglSwapInterval;
 
 typedef  HGLRC wgl_Create_Context_Attribs_ARB(HDC hDC, HGLRC hShareContext, const int *attribList);
+
+wgl_Create_Context_Attribs_ARB *Global_wglCreateContextAttribsARB;
 
 #define DIRECT_SOUND_CREATE(name) HRESULT name(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN  pUnkOuter)
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
@@ -348,9 +362,9 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
     return Result;
 }
 
-internal void
-Win32InitOpenGL(HWND Window) {
-    HDC WindowDC = GetDC(Window);
+internal HGLRC
+Win32InitOpenGL(HDC WindowDC) {
+    HGLRC Result = {};
     
     //NOTE: Pixel format we would like.
     PIXELFORMATDESCRIPTOR DesiredPixelFormat = {};
@@ -371,35 +385,29 @@ Win32InitOpenGL(HWND Window) {
     PIXELFORMATDESCRIPTOR SuggestedPixelFormat;
     DescribePixelFormat(WindowDC, SuggestedPixelFormatIndex, sizeof(SuggestedPixelFormat), &SuggestedPixelFormat);
     SetPixelFormat(WindowDC, SuggestedPixelFormatIndex, &SuggestedPixelFormat);
-    HGLRC GLRenderContext = wglCreateContext(WindowDC); //To do multi-threaded texture downloads we want to allow for multi threads to share the same context and therefore have a knowledge of which textures are being used by each other. 
-    if(wglMakeCurrent(WindowDC, GLRenderContext)) {
+    
+    HGLRC RenderContext = wglCreateContext(WindowDC); 
+    
+    if(wglMakeCurrent(WindowDC, RenderContext)) {
         
         b32 IsModernContext = false;
-        wgl_Create_Context_Attribs_ARB *wglCreateContextAttribsARB =(wgl_Create_Context_Attribs_ARB *)wglGetProcAddress("wglCreateContextAttribsARB");
+        Global_wglCreateContextAttribsARB =(wgl_Create_Context_Attribs_ARB *)wglGetProcAddress("wglCreateContextAttribsARB");
         
-        //Hey Are you a modern version of openGl, if so can you give me a modern context
-        if(wglCreateContextAttribsARB) {
+        if(Global_wglCreateContextAttribsARB) {
             // NOTE(OLIVER): Modern version of OpenlGl supported
-            int Attribs[] = {
-                WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-                WGL_CONTEXT_MINOR_VERSION_ARB, 0,
-                WGL_CONTEXT_FLAGS_ARB, 0 // NOTE(OLIVER): Enable For testing WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB
-#if _INTERNAL
-                |WGL_CONTEXT_DEBUG_BIT_ARB
-#endif
-                ,
-                WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-                0
-            };
+            
             HGLRC ShareContext = 0;
-            HGLRC ModernContext = wglCreateContextAttribsARB(WindowDC, ShareContext, Attribs);
+            HGLRC ModernContext = Global_wglCreateContextAttribsARB(WindowDC, ShareContext, OpenGLAttribs);
             if(ModernContext) {
                 if(wglMakeCurrent(WindowDC, ModernContext)) {
-                    wglDeleteContext(GLRenderContext);
-                    GLRenderContext = ModernContext;
+                    wglDeleteContext(RenderContext);
+                    RenderContext = ModernContext;
                     IsModernContext = true;
+                    Result = ModernContext;
                 }
                 
+            } else {
+                InvalidCodePath;
             }
         } else{
             // NOTE(OLIVER): This is an antiquated version of OpenGl i.e. below version 3?
@@ -415,8 +423,7 @@ Win32InitOpenGL(HWND Window) {
     } else {
         InvalidCodePath
     }
-    ReleaseDC(Window, WindowDC);
-    
+    return Result;
 }
 
 internal void 
@@ -540,9 +547,7 @@ GetButtonState_(game_button *Button, u32 NumberOfKeys, ...)
 }
 
 //TODO(ollie): Make safe for threads other than the main thread to add stuff
-internal void
-PushWorkOntoQueue(thread_info *Info, thread_work_function *WorkFunction, void *Data)
-{
+PLATFORM_PUSH_WORK_ONTO_QUEUE(Win32PushWorkOntoQueue) {
     for(;;)
     {
         u32 OnePastTheHead = (Info->IndexToAddTo + 1) % ArrayCount(Info->WorkQueue);
@@ -611,6 +616,16 @@ internal DWORD
 Win32ThreadEntryPoint(LPVOID Info_)
 {
     thread_info *Info = (thread_info *)Info_;
+    
+    if(Global_wglCreateContextAttribsARB) {
+        Assert(Info->WindowDC);
+        Assert(Info->ContextForThread);
+        if(wglMakeCurrent(Info->WindowDC, Info->ContextForThread)) {
+            
+        } else {
+            InvalidCodePath;
+        }
+    } 
     
     for(;;)
     {
@@ -709,7 +724,8 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             
             ShowCursor(FALSE);
             
-            Win32InitOpenGL(WindowHandle);
+            HDC WindowDC = GetDC(WindowHandle);
+            HGLRC MainRenderContext = Win32InitOpenGL(WindowDC);
             
             SYSTEM_INFO SystemInfo;
             GetSystemInfo(&SystemInfo);
@@ -722,6 +738,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             ThreadInfo.Semaphore = CreateSemaphore(0, 0, NumberOfUnusedProcessors, 0);
             ThreadInfo.IndexToTakeFrom = ThreadInfo.IndexToAddTo = 0;
             ThreadInfo.WindowHandle = WindowHandle;
+            ThreadInfo.WindowDC = WindowDC;
             
             for(u32 WorkIndex = 0;
                 WorkIndex < ArrayCount(ThreadInfo.WorkQueue);
@@ -739,16 +756,13 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 CoreIndex < (u32)CoreCount;
                 ++CoreIndex)
             {
+                HGLRC ContextForThisThread =  Global_wglCreateContextAttribsARB(WindowDC, MainRenderContext, OpenGLAttribs);
+                
+                ThreadInfo.ContextForThread = ContextForThisThread;
                 Assert(ThreadCount < ArrayCount(Threads));
                 Threads[ThreadCount++] = CreateThread(0, 0, Win32ThreadEntryPoint, &ThreadInfo, 0, 0);
             }
             
-            /*
-            PushWorkOntoQueue(&ThreadInfo, PrintTest, "Hello");
-            PushWorkOntoQueue(&ThreadInfo, PrintTest, "Hello");
-            PushWorkOntoQueue(&ThreadInfo, PrintTest, "Hello");
-            PushWorkOntoQueue(&ThreadInfo, PrintTest, "Hello");
-*/
             QueryPerformanceFrequency(&GlobalTimeFrequencyDatum);
             
             timeBeginPeriod(1);
@@ -830,9 +844,11 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
             GameMemory.PlatformFileSize = Win32FileSize;
             GameMemory.PlatformBeginFile = Win32BeginFile;
             GameMemory.PlatformBeginFileWrite = Win32BeginFileWrite;
+            GameMemory.PlatformPushWorkOntoQueue = Win32PushWorkOntoQueue;
             GameMemory.PlatformEndFile = Win32EndFile;
             GameMemory.GameRunningPtr = &GlobalRunning;
             GameMemory.SoundOn = false;
+            GameMemory.ThreadInfo = &ThreadInfo;
             
 #if WRITE_FONT_FILE
             Win32WriteFontFile();
@@ -1041,7 +1057,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                         {
                             BytesToWrite = 0;
                         }
-                        
+#if 0
                         if(WasPressed(GameMemory.GameButtons[Button_Left])) {
                             ViewIndex++;
                         }
@@ -1063,7 +1079,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                         
                         PushRect(&OrthoRenderGroup, Rect2MinMax(V2(PlayCursorX, 0), V2(PlayCursorX + 5, 100)), 1, V4(1, 0, 0, 1));
                         
-                        
+#endif
                         game_sound_buffer GameSoundBuffer = {};
                         GameSoundBuffer.Samples = AudioSamples;
                         GameSoundBuffer.SamplesToWrite = BytesToWrite / SoundInfo.BytesPerSampleForBothChannels;
@@ -1103,7 +1119,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                     
                     win32_dimension WindowDim = Win32GetClientDimension(WindowHandle);
                     
-                    HDC WindowDC = GetDC(WindowHandle);
+                    HDC WindowDCTemp = GetDC(WindowHandle);
 #if SOFTWARE_RENDERER
                     RenderGroupToOutput(&RenderGroup);
                     RenderGroupToOutput(&OrthoRenderGroup);
@@ -1112,7 +1128,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
 #else
                     
                     
-#define DRAW_FRAME_RATE 0
+#define DRAW_FRAME_RATE 1
 #if DRAW_FRAME_RATE
                     SecondsElapsed = Win32GetSecondsElapsed(Win32GetTimeCount(), LastCounter);
                     
@@ -1134,7 +1150,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                     
                     SwapBuffers(WindowDC);
 #endif
-                    ReleaseDC(WindowHandle, WindowDC);
+                    ReleaseDC(WindowHandle, WindowDCTemp);
                     
                     FirstTimeInGameLoop = false;
                 }

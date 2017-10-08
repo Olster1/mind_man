@@ -11,9 +11,8 @@ REM 32-bit build
 REM cl %CommonCompilerFlags% ..\mind_man\code\meta_generator.cpp -Fmcalm_win32.map /link %CommonLinkerFlags%
 
 pushd ..\mind_man\code
-REM ..\..\..\build_extra_projects\meta_generator.exe
+REM  ..\..\..\build_extra_projects\meta_generator.exe
 popd
 
 cl %CommonCompilerFlags% ..\mind_man\code\calm_win32.cpp -Fmcalm_win32.map /link %CommonLinkerFlags%
 popd
-

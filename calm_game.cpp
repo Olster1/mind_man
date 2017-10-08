@@ -573,6 +573,8 @@ internal b32 UpdateEntityPositionViaFunction(game_state *GameState, entity *Enti
             }
 #endif
         }
+    } else {
+        Entity->Velocity = {};
     }
     
     return WentToNewMove;
@@ -888,10 +890,13 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                             GameState->EntityIDAt = ID + 1;
                         }
                         
+                        if(Type == Entity_Player) {
+                            GameState->RestartPlayerPosition = Pos;
+                        }
+                        
                         entity *Entity = InitEntity(GameState, Pos, Dim, Type, ID);
                         for(u32 ValueIndex = EntityInfoCount; ValueIndex < DataAt; ++ValueIndex) {AddChunkType(Entity, (chunk_type)CastAs(s32, Datas[ValueIndex].Value));
                         }
-                        
                     }
                 }
             }
@@ -901,6 +906,9 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
     } else {
         
         entity *Player = InitEntity(GameState, V2(-1, -1), V2(WorldChunkInMeters, WorldChunkInMeters), Entity_Player, GameState->EntityIDAt++);
+        
+        GameState->RestartPlayerPosition = V2(-1, -1);
+        
         AddChunkType(Player, ChunkDark);
         AddChunkType(Player, ChunkLight);
         
@@ -963,6 +971,10 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->StringArena = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
         
+        for(u32 i = 0; i < ArrayCount(GameState->ThreadArenas); ++i) {
+            GameState->ThreadArenas[i] = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
+        }
+        
         GameState->UIState = PushStruct(&GameState->MemoryArena, ui_state);
         
         /////////////////////////////////
@@ -996,10 +1008,16 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->DarkTiles[BOTTOM_CENTER_TILE] = LoadBitmap(Memory, 0, "static_bottom.bmp");
         GameState->DarkTiles[BOTTOM_RIGHT_TILE] = LoadBitmap(Memory, 0, "static_right.bmp");
         
-        GameState->Crate = LoadBitmap(Memory, 0, "crate.bmp ");
+        //GameState->Crate = LoadImage(Memory, 0, "crate.bmp ");
+        GameState->Crate = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.3f));
         GameState->Water = LoadBitmap(Memory, 0, "water3.bmp");
         GameState->Desert = LoadBitmap(Memory, 0, "desert.bmp");
         
+        GameState->Door = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.05f));
+        
+        GameState->Monster = LoadBitmap(Memory, 0, "monster1.bmp");
+        
+        GameState->BackgroundImage = LoadImage(Memory, &GameState->MemoryArena, "background_sun.png", V2(0.5f, 0.5f));
         
         
         GameState->KnightAnimationCount = 0;
@@ -1157,23 +1175,33 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
     }
     EmptyMemoryArena(&GameState->RenderArena);
-    InitRenderGroup(OrthoRenderGroup, Buffer, &GameState->RenderArena, MegaBytes(1), V2(1, 1), V2(0, 0), V2(1, 1));
+    InitRenderGroup(OrthoRenderGroup, Buffer, &GameState->RenderArena, MegaBytes(1), V2(1, 1), V2(0, 0), V2(1, 1), Memory->ThreadInfo, GameState, Memory);
     
     
     
-    InitRenderGroup(RenderGroup, Buffer, &GameState->RenderArena, MegaBytes(1), V2(60, 60), 0.5f*V2i(Buffer->Width, Buffer->Height), V2(1, 1));
+    InitRenderGroup(RenderGroup, Buffer, &GameState->RenderArena, MegaBytes(1), V2(60, 60), 0.5f*V2i(Buffer->Width, Buffer->Height), V2(1, 1), Memory->ThreadInfo, GameState, Memory);
     
     temp_memory PerFrameMemory = MarkMemory(&GameState->PerFrameArena);
     
     DebugConsole.RenderGroup = OrthoRenderGroup;
     
-    PushClear(RenderGroup, V4(0.5f, 0.5f, 0.5f, 1)); // TODO(Oliver): I guess it doesn't matter but maybe push this to the ortho group once z-index scheme is in place. 
+    rect2 BufferRect = Rect2(0, 0, (r32)Buffer->Width, (r32)Buffer->Height);
+    
+    v2 BufferSize = 0.5f*BufferRect.Max;
+    PushClear(RenderGroup, V4(0.5f, 0.5f, 0.5f, 1));
+    PushBitmap(RenderGroup, V3(0, 0, 1), &GameState->BackgroundImage, BufferRect.Max.X/MetersToPixels, BufferRect);
+    // TODO(Oliver): I guess it doesn't matter but maybe push this to the ortho group once z-index scheme is in place. 
     
     Player = FindFirstEntityOfType(GameState, Entity_Player);
     
     
     switch(GameState->GameMode) {
         case MENU_MODE: {
+            if(WasPressed(Memory->GameButtons[Button_Escape]))
+            {
+                GameState->GameMode = PLAY_MODE;
+                break;
+            }
             UpdateMenu(&GameState->PauseMenu,GameState, Memory, OrthoRenderGroup, dt);
             GameState->RenderConsole = false;
             
@@ -1185,7 +1213,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             if(WasPressed(Memory->GameButtons[Button_Enter])) {
                 switch(GameState->GameOverMenu.IndexAt) {
                     case 0: {
-                        Player->Pos = V2(-1, -1);
+                        Player->Pos = GameState->RestartPlayerPosition;
                         Player->VectorIndexAt = Player->Path.Count;
                         GameState->GameMode = PLAY_MODE;
                     } break;
@@ -1228,6 +1256,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             {
                 GameState->GameMode = MENU_MODE;
                 break;
+            }
+            if(WasPressed(Memory->GameButtons[Button_F3])) {
+                Flip(GameState->ShowHUD);
             }
             if(WasPressed(Memory->GameButtons[Button_F1]))
             {
@@ -1417,21 +1448,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
 #endif
             }
             
-            r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
-            r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f};
-            Qualities[DIRECTION] = (r32)atan2(Player->Velocity.Y, Player->Velocity.X); 
-#if 1
-            animation *NewAnimation = GetAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, Qualities, Weights);
-            
-            AddAnimationToList(GameState, &GameState->MemoryArena, Player, NewAnimation);
-            
-            
-#else 
-            animation *NewAnimation = &GameState->KnightAnimations[4];
-#endif
-            
-            rect2 BufferRect = Rect2(0, 0, (r32)Buffer->Width, (r32)Buffer->Height);
-            
             entity *Camera = FindFirstEntityOfType(GameState, Entity_Camera);
             
             
@@ -1520,10 +1536,33 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             }
 #endif
             
+            entity *Philosopher = FindFirstEntityOfType(GameState, Entity_Philosopher);
+            for(u32 i = 0; i < GameState->CheckPointCount; i++) {
+                check_point_parent *Parent = GameState->CheckPointParents + i;
+                
+                for(u32 j = 0; j < Parent->Count; j++) {
+                    v4 Color = V4(0, 1, 0, 1);
+                    if(Philosopher->CheckPointParentAt == i) {
+                        if(j == Philosopher->CheckPointAt) {
+                            Color= V4(1, 0, 0, 1);
+                        } else {
+                            Color= V4(1, 0, 1, 1);
+                        }
+                    }
+                    check_point *CheckPoint = Parent->CheckPoints + j;
+                    v2 RelPos = WorldChunkInMeters*V2i(CheckPoint->Pos) - CamPos;
+                    rect2 CheckPointRect = Rect2CenterDim(RelPos, V2(0.4f, 0.4f));
+                    PushRect(RenderGroup, CheckPointRect, 1, Color);
+                    
+                }
+            }
+            
             r32 PercentOfScreen = 0.1f;
             v2 CameraWindow = (1.0f/MetersToPixels)*PercentOfScreen*V2i(Buffer->Width, Buffer->Height);
             //NOTE(): Draw Camera bounds that the player stays within. 
-            PushRectOutline(RenderGroup, Rect2(-CameraWindow.X, -CameraWindow.Y, CameraWindow.X, CameraWindow.Y), 1, V4(1, 0, 1, 1));
+            if(GameState->ShowHUD) {
+                PushRectOutline(RenderGroup, Rect2(-CameraWindow.X, -CameraWindow.Y, CameraWindow.X, CameraWindow.Y), 1, V4(1, 0, 1, 1));
+            }
             ////
             for(u32 EntityIndex = 0; EntityIndex < GameState->EntityCount; ++EntityIndex)
             {
@@ -1558,8 +1597,51 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 if(!IsEmpty(&Entity->AnimationListSentintel)) {
                                     bitmap *CurrentBitmap = GetBitmap(Entity->AnimationListSentintel.Next);
                                     
-                                    PushBitmap(RenderGroup, V3(EntityRelP, 1), CurrentBitmap,  WorldChunkInMeters, BufferRect);
-                                    UpdateAnimation(GameState, Entity, dt);
+                                    PushBitmap(RenderGroup, V3(EntityRelP, 1), CurrentBitmap,  1.7f*WorldChunkInMeters, BufferRect);
+                                    
+                                    //// NOTE(OLIVER): Preparing to look for new animation State
+#define USE_ANIMATION_STATES 0
+                                    animation *NewAnimation = 0;
+                                    r32 DirectionValue = 0;
+                                    if(Player->Velocity.X != 0 || Player->Velocity.Y != 0) {
+                                        v2 PlayerVelocity = Normal(Player->Velocity);
+                                        DirectionValue = ATan2_0toTau(PlayerVelocity.Y, PlayerVelocity.X);
+                                        //AddToOutBuffer("%f\n\n", DirectionValue);
+                                    }
+#if USE_ANIMATION_STATES
+                                    r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
+                                    r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f};
+                                    
+                                    Qualities[DIRECTION] = DirectionValue; 
+                                    
+                                    NewAnimation = GetAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, Qualities, Weights);
+#else 
+                                    char *AnimationName = 0;
+                                    r32 Speed = Length(Player->Velocity);
+                                    AddToOutBuffer("%f\n", Speed);
+                                    if(Speed < 1.0f) {
+                                        AnimationName = "Knight_Idle";
+                                    } else {
+                                        if (DirectionValue == 0) {
+                                            AnimationName = "Knight_Run_Right";
+                                        } 
+                                        else if (DirectionValue == 0.25f*TAU32) {
+                                            AnimationName = "Knight_Run_Up";
+                                        } 
+                                        else if (DirectionValue == 0.5f*TAU32) {
+                                            AnimationName = "Knight_Run_Left";
+                                        } 
+                                        else if (DirectionValue == 0.75f*TAU32) {
+                                            AnimationName = "Knight_Run_Down";
+                                        } 
+                                    }
+                                    
+                                    NewAnimation = FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, AnimationName);
+#endif
+                                    
+                                    Assert(NewAnimation);
+                                    UpdateAnimation(GameState, Entity, dt, NewAnimation);
+                                    ///
                                 } else {
                                     
                                     PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
@@ -1567,6 +1649,17 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             }
                             
                             ///////
+                        } break;
+                        case Entity_Door: {
+                            v2i EntityPos = GetGridLocation(Entity->Pos);
+                            GetOrCreateWorldChunk(GameState->Chunks, EntityPos.X, EntityPos.Y, 0, ChunkNull);
+                            
+                            
+                            
+                            //PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
+                            
+                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Door,  1.1f*WorldChunkInMeters, BufferRect);
+                            
                         } break;
                         case Entity_Philosopher: {
                             if(!GameState->UIState->GamePaused) {
@@ -1597,6 +1690,21 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 } 
                                 //Then if we couldn't find the player we just move a random direction
                                 if(!WasSuccessful && !HasMovesLeft(Entity)) {
+                                    if(Entity->CheckPointParentAt) {
+                                        check_point_parent *Parent = GameState->CheckPointParents + Entity->CheckPointParentAt;
+                                        check_point *CurrentCheckPoint = Parent->CheckPoints + Entity->CheckPointAt;
+                                        
+                                        v2 TargetPos_r32 = WorldChunkInMeters*V2i(CurrentCheckPoint->Pos);
+                                        b32 SuccessfulMove = InitializeMove(GameState, Entity, TargetPos_r32);
+                                        Assert(SuccessfulMove);
+                                        
+                                        Entity->CheckPointAt++;
+                                        if(Entity->CheckPointAt >= Parent->Count) {
+                                            Entity->CheckPointAt = 0;
+                                        }
+                                    }
+#define RANDOM_WALK 0
+#if RANDOM_WALK
                                     
                                     random_series *RandGenerator = &GameState->GeneralEntropy;
                                     
@@ -1627,11 +1735,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                     }
                                     Entity->LastMoves[Entity->LastMoveAt++] = V2int(-Dir.X,-Dir.Y);
                                     if(Entity->LastMoveAt >= ArrayCount(Entity->LastMoves)) { Entity->LastMoveAt = 0;}
-#if 0
+                                    
                                     v2 TargetPos_r32 = WorldChunkInMeters*V2i(GetGridLocation(Entity->Pos) + Dir);
                                     b32 SuccessfulMove = InitializeMove(GameState, Entity, TargetPos_r32);
                                     Assert(SuccessfulMove);
-#endif
+#endif //Random walk 
+                                    
                                 }
                                 
                                 UpdateEntityPositionViaFunction(GameState, Entity, dt);
@@ -1639,7 +1748,11 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                     GameState->GameMode = GAMEOVER_MODE;
                                 }
                             }
+#if 0
                             PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 0, 1));
+#else 
+                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Monster,  1.0f*WorldChunkInMeters, BufferRect);
+#endif
                             //PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->MossBlockBitmap,  BufferRect);
                         } break;
                         case Entity_Block: {
@@ -1731,332 +1844,331 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             
             
             //////////////UI Update And Rendering////////////////
+            if(GameState->ShowHUD) {
 #define PushOntoLastElms(LastElms, LastElmCount, ChildElm)  Assert(LastElmCount < ArrayCount(LastElms)); CurrentElm = LastElms[LastElmCount++] = ChildElm;
-            
-            u32 ArrayCount = 0; 
-            u32 IndexesProcessed[ArrayCount(GameState->UIState->Elements)] = {};
-            v2 PosAt = {};
-            ui_element *NextHotEntity = 0;
-            r32 IndentSpace = 20;
-            u32 LastElmCount = 0;
-            ui_element *LastElms[64] = {};
-            r32 MenuWidth = 300;
-            v2 StartP = {};
-            
-            for(u32 UIIndex = 0; UIIndex < GameState->UIState->ElmCount; ++UIIndex) {
-                ui_element *Element = GameState->UIState->Elements + UIIndex;
                 
-                //loop through all ui elements
-                if(!IndexesProcessed[UIIndex] && Element->IsValid) { //Check if it has been drawn
-                    Assert(LastElmCount == 0);
-                    StartP = PosAt = Element->Set.Pos;
+                u32 ArrayCount = 0; 
+                u32 IndexesProcessed[ArrayCount(GameState->UIState->Elements)] = {};
+                v2 PosAt = {};
+                ui_element *NextHotEntity = 0;
+                r32 IndentSpace = 20;
+                u32 LastElmCount = 0;
+                ui_element *LastElms[64] = {};
+                r32 MenuWidth = 300;
+                v2 StartP = {};
+                
+                for(u32 UIIndex = 0; UIIndex < GameState->UIState->ElmCount; ++UIIndex) {
+                    ui_element *Element = GameState->UIState->Elements + UIIndex;
                     
-                    rect2 ClipRect = Rect2MinDim(StartP, V2(MenuWidth, StartP.Y + MAX_S32));
-                    
-                    ui_element *CurrentElm = 0;
-                    
-                    PushOntoLastElms(LastElms, LastElmCount, Element);
-                    
-                    for(;;) {
-                        Assert(LastElmCount > 0);
-                        CurrentElm = LastElms[LastElmCount - 1];
+                    //loop through all ui elements
+                    if(!IndexesProcessed[UIIndex] && Element->IsValid) { //Check if it has been drawn
+                        Assert(LastElmCount == 0);
+                        StartP = PosAt = Element->Set.Pos;
                         
-                        for(u32 ChildAt = CurrentElm->TempChildrenCount; 
-                            ChildAt <  CurrentElm->ChildrenCount; 
-                            ) {
-                            b32 AdvanceChildIndex = true;
-                            u32 ChildIndex = CurrentElm->ChildrenIndexes[ChildAt];
+                        rect2 ClipRect = Rect2MinDim(StartP, V2(MenuWidth, StartP.Y + MAX_S32));
+                        
+                        ui_element *CurrentElm = 0;
+                        
+                        PushOntoLastElms(LastElms, LastElmCount, Element);
+                        
+                        for(;;) {
+                            Assert(LastElmCount > 0);
+                            CurrentElm = LastElms[LastElmCount - 1];
                             
-                            IndexesProcessed[ChildIndex] = true;
-                            
-                            ui_element *ChildElm = &GameState->UIState->Elements[ChildIndex];
-                            
-                            Assert(ChildElm->IsValid);
-                            
-                            rect2 ElementAsRect = {};
-                            switch(ChildElm->Type) {
-                                case UI_Moveable:{
-                                    ElementAsRect = Rect2MinMax(V2(PosAt.X, PosAt.Y - GameState->DebugFont->LineAdvance), V2(PosAt.X + MenuWidth, PosAt.Y));
-                                    PushRectOutline(OrthoRenderGroup, ElementAsRect, 1, V4(0.5f, 1, 0, 1)); 
-                                    PosAt.Y -= GetHeight(ElementAsRect);
-                                } break;
-                                case UI_DropDownBoxParent: {
-                                    if(ChildElm->Set.Active) {
-                                        if(ChildElm->ChildrenCount) {
+                            for(u32 ChildAt = CurrentElm->TempChildrenCount; 
+                                ChildAt <  CurrentElm->ChildrenCount; 
+                                ) {
+                                b32 AdvanceChildIndex = true;
+                                u32 ChildIndex = CurrentElm->ChildrenIndexes[ChildAt];
+                                
+                                IndexesProcessed[ChildIndex] = true;
+                                
+                                ui_element *ChildElm = &GameState->UIState->Elements[ChildIndex];
+                                
+                                Assert(ChildElm->IsValid);
+                                
+                                rect2 ElementAsRect = {};
+                                switch(ChildElm->Type) {
+                                    case UI_Moveable:{
+                                        ElementAsRect = Rect2MinMax(V2(PosAt.X, PosAt.Y - GameState->DebugFont->LineAdvance), V2(PosAt.X + MenuWidth, PosAt.Y));
+                                        PushRectOutline(OrthoRenderGroup, ElementAsRect, 1, V4(0.5f, 1, 0, 1)); 
+                                        PosAt.Y -= GetHeight(ElementAsRect);
+                                    } break;
+                                    case UI_DropDownBoxParent: {
+                                        if(ChildElm->Set.Active) {
+                                            if(ChildElm->ChildrenCount) {
 #if 0
-                                            u32 DropDownChildIndex = ChildElm->ChildrenIndexes[ChildElm->Set.ActiveChildIndex];
-                                            ui_element *ActiveElm = GameState->UIState->Elements + DropDownChildIndex;
+                                                u32 DropDownChildIndex = ChildElm->ChildrenIndexes[ChildElm->Set.ActiveChildIndex];
+                                                ui_element *ActiveElm = GameState->UIState->Elements + DropDownChildIndex;
 #endif
+                                                DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
+                                            }
+                                        }
+                                    } break;
+                                    case UI_DropDownBox: {
+                                        Assert(CurrentElm->Type == UI_DropDownBoxParent);
+                                        if(!CurrentElm->Set.Active) {
                                             DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
                                         }
-                                    }
-                                } break;
-                                case UI_DropDownBox: {
-                                    Assert(CurrentElm->Type == UI_DropDownBoxParent);
-                                    if(!CurrentElm->Set.Active) {
+                                        
+                                    } break;
+                                    case UI_CheckBox: {
                                         DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
-                                    }
-                                    
-                                } break;
-                                case UI_CheckBox: {
-                                    DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
-                                } break;
-                                case UI_Button: {
-                                    DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
-                                } break;
-                                case UI_Entity: {
-                                    //Already Rendered Above
-                                    u32 ID = CastVoidAs(u32, ChildElm->Set.ValueLinkedToPtr);
-                                    entity *Entity = FindEntityFromID(GameState, ID);
-                                    v2 EntityRelP = Entity->Pos - CamPos;
-                                    
-                                    ElementAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
-                                    if(InBounds(ElementAsRect, MouseP_PerspectiveSpace)) {
-                                        NextHotEntity = ChildElm;
-                                        //AddToOutBuffer("Is Hot!\n");
-                                    }
-                                    
-                                } break;
-                            }
-                            
-                            ChildElm->Set.Pos = ElementAsRect.Min;
-                            ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
-                            
-                            if(InBounds(ElementAsRect, MouseP_OrthoSpace)) {
-                                NextHotEntity = ChildElm;
-                            }
-                            
-                            if(ChildElm->ChildrenCount) {
-                                PosAt.X += IndentSpace;
-                                CurrentElm->TempChildrenCount = ChildAt + 1;
-                                PushOntoLastElms(LastElms, LastElmCount, ChildElm);
-                                AdvanceChildIndex = false;
-                            } 
-                            if(AdvanceChildIndex) {
-                                ++ChildAt;
-                            }
-                        }
-                        CurrentElm->TempChildrenCount = 0;
-                        
-                        if(LastElmCount > 1) {
-                            PosAt.X -= IndentSpace;
-                            LastElmCount--;
-                        } else {
-                            LastElmCount--;
-                            // NOTE(Oliver): Finshed rendering whole ui structure
-                            break; 
-                        }
-                    }
-                }
-            }
-            
-            //PushRectOutline(OrthoRenderGroup, Rect2MinMax(V2(0, 0),V2(100, 100)), 1, V4(0, 0, 0, 1)); 
-            
-            //AddToOutBuffer("{%f, %f}", MouseP_OrthoSpace.X, MouseP_OrthoSpace.Y);
-            
-            ///////////////
-            ui_state *UIState = GameState->UIState;
-            if(WasPressed(Memory->GameButtons[Button_LeftMouse])) {
-                //Add Block
-                if(IsDown(Memory->GameButtons[Button_Shift])) {
-                    v2i Cell = GetGridLocation(MouseP_PerspectiveSpace + Camera->Pos);
-                    world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, 0, ChunkNull);
-                    
-                    enum_array_data *Info = &UIState->InitInfo;
-                    char *A = Info->Type;
-                    if(A) {
-                        if(Chunk) {
-                            
-                            if(DoStringsMatch(A, "entity_type")) {
-                                CastValue(Info, entity_type);
-                                v2 Pos = WorldChunkInMeters*V2i(Cell);
-                                entity *Ent = GetEntityAnyType(GameState, Pos);
-                                if(Ent) {
-                                    if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
-                                        if(Ent->Type == Entity_Block) {
-                                            Chunk->Type = Chunk->MainType;
+                                    } break;
+                                    case UI_Button: {
+                                        DrawMenuItem(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
+                                    } break;
+                                    case UI_Entity: {
+                                        //Already Rendered Above
+                                        u32 ID = CastVoidAs(u32, ChildElm->Set.ValueLinkedToPtr);
+                                        entity *Entity = FindEntityFromID(GameState, ID);
+                                        v2 EntityRelP = Entity->Pos - CamPos;
+                                        
+                                        ElementAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
+                                        if(InBounds(ElementAsRect, MouseP_PerspectiveSpace)) {
+                                            NextHotEntity = ChildElm;
+                                            //AddToOutBuffer("Is Hot!\n");
                                         }
-                                        RemoveEntity(GameState, Ent->Index);
-                                    }
-                                } else {
-                                    if(Value == Entity_Chunk_Changer) {
-                                        entity *Entity = InitEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
-                                        Entity->LoopChunks = true;
-                                        AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                        AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                    } else {
-                                        AddEntity(GameState, Pos, Value);
-                                    }
+                                        
+                                    } break;
                                 }
-                            } 
-                        } 
-                        
-                        if(DoStringsMatch(A, "chunk_type")) {
-                            CastValue(Info, chunk_type);
-                            
-                            if(Chunk && Chunk->Type == Value) {
-                                RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
-                            } else {
-                                if(!Chunk) {
-                                    Assert(Value != ChunkNull);
-                                    Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
-                                } 
                                 
-                                Chunk->Type = Value;
+                                ChildElm->Set.Pos = ElementAsRect.Min;
+                                ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
+                                
+                                if(InBounds(ElementAsRect, MouseP_OrthoSpace)) {
+                                    NextHotEntity = ChildElm;
+                                }
+                                
+                                if(ChildElm->ChildrenCount) {
+                                    PosAt.X += IndentSpace;
+                                    CurrentElm->TempChildrenCount = ChildAt + 1;
+                                    PushOntoLastElms(LastElms, LastElmCount, ChildElm);
+                                    AdvanceChildIndex = false;
+                                } 
+                                if(AdvanceChildIndex) {
+                                    ++ChildAt;
+                                }
                             }
-                        }
-                    } else {
-                        AddToOutBuffer("No Entity type selected\n");
-                    }
-                } else { //Picking up entities with mouse. 
-                    
-                    if(!UIState->InteractingWith) {
-                        if(!NextHotEntity) {
-#if MOVE_VIA_MOUSE
-                            //NOTE: This is where we move the player.
-                            v2 TargetP_r32 = MouseP_PerspectiveSpace + GameState->Camera->Pos;
-                            InitializeMove(GameState, Player, TargetP_r32);
-#endif
-                        } else {
-                            //NOTE: This is interactable objects;
-                            Assert(NextHotEntity->IsValid);
-                            UIState->HotEntity = NextHotEntity;
-                            UIState->InteractingWith = UIState->HotEntity;
-                            if(UIState->InteractingWith->Type == UI_Entity) {
-                                GetEntityFromElement(UIState);
-                                Entity->RollBackPos = Entity->Pos;
+                            CurrentElm->TempChildrenCount = 0;
+                            
+                            if(LastElmCount > 1) {
+                                PosAt.X -= IndentSpace;
+                                LastElmCount--;
+                            } else {
+                                LastElmCount--;
+                                // NOTE(Oliver): Finshed rendering whole ui structure
+                                break; 
                             }
                         }
                     }
                 }
-            }
-            if(WasReleased(Memory->GameButtons[Button_LeftMouse])) {
                 
-                //MOUSE BUTTON RELEASED ACTIONS
-                if(UIState->InteractingWith) {
-                    ui_element *InteractEnt = UIState->InteractingWith;
-                    switch(InteractEnt->Type) {
-                        case UI_DropDownBox: {
-                            ui_element *Parent = InteractEnt->Parent;
+                //PushRectOutline(OrthoRenderGroup, Rect2MinMax(V2(0, 0),V2(100, 100)), 1, V4(0, 0, 0, 1)); 
+                
+                //AddToOutBuffer("{%f, %f}", MouseP_OrthoSpace.X, MouseP_OrthoSpace.Y);
+                
+                ///////////////
+                ui_state *UIState = GameState->UIState;
+                if(WasPressed(Memory->GameButtons[Button_LeftMouse])) {
+                    //Add Block
+                    if(IsDown(Memory->GameButtons[Button_Shift])) {
+                        v2i Cell = GetGridLocation(MouseP_PerspectiveSpace + Camera->Pos);
+                        world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, 0, ChunkNull);
+                        
+                        enum_array_data *Info = &UIState->InitInfo;
+                        char *A = Info->Type;
+                        if(A) {
+                            if(Chunk) {
+                                
+                                if(DoStringsMatch(A, "entity_type")) {
+                                    CastValue(Info, entity_type);
+                                    v2 Pos = WorldChunkInMeters*V2i(Cell);
+                                    entity *Ent = GetEntityAnyType(GameState, Pos);
+                                    if(Ent) {
+                                        if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
+                                            if(Ent->Type == Entity_Block) {
+                                                Chunk->Type = Chunk->MainType;
+                                            }
+                                            RemoveEntity(GameState, Ent->Index);
+                                        }
+                                    } else {
+                                        if(Value == Entity_Chunk_Changer) {
+                                            entity *Entity = InitEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
+                                            Entity->LoopChunks = true;
+                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                        } else {
+                                            AddEntity(GameState, Pos, Value);
+                                        }
+                                    }
+                                } 
+                            } 
                             
-                            //VIEW
-                            Parent->Set.Name = InteractEnt->Set.Name;
-                            
-                            //DATA
-                            enum_array_data *ValueToMod = (enum_array_data *)InteractEnt->Set.ValueLinkedToPtr;
-                            
-                            *ValueToMod = InteractEnt->Set.EnumArray;
-                            
-                            //Show Active
-                            Parent->Set.Active = !Parent->Set.Active;
-                        } break;
-                        case UI_Moveable: {
-                            
-                        } break;
-                        case UI_Button: {
-                            // TODO(Oliver): Can we make this more generic?
-                            if(DoStringsMatch(InteractEnt->Set.Type, "Save Level")) {
-                                SaveLevelToDisk(Memory, GameState, "level1.omm");
+                            if(DoStringsMatch(A, "chunk_type")) {
+                                CastValue(Info, chunk_type);
+                                
+                                if(Chunk && Chunk->Type == Value) {
+                                    RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
+                                } else {
+                                    if(!Chunk) {
+                                        Assert(Value != ChunkNull);
+                                        Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
+                                    } 
+                                    
+                                    Chunk->Type = Value;
+                                }
                             }
-                        } break;
+                        } else {
+                            AddToOutBuffer("No Entity type selected\n");
+                        }
+                    } else { //Picking up entities with mouse. 
+                        
+                        if(!UIState->InteractingWith) {
+                            if(!NextHotEntity) {
+#if MOVE_VIA_MOUSE
+                                //NOTE: This is where we move the player.
+                                v2 TargetP_r32 = MouseP_PerspectiveSpace + GameState->Camera->Pos;
+                                InitializeMove(GameState, Player, TargetP_r32);
+#endif
+                            } else {
+                                //NOTE: This is interactable objects;
+                                Assert(NextHotEntity->IsValid);
+                                UIState->HotEntity = NextHotEntity;
+                                UIState->InteractingWith = UIState->HotEntity;
+                                if(UIState->InteractingWith->Type == UI_Entity) {
+                                    GetEntityFromElement(UIState);
+                                    Entity->RollBackPos = Entity->Pos;
+                                }
+                            }
+                        }
+                    }
+                }
+                if(WasReleased(Memory->GameButtons[Button_LeftMouse])) {
+                    
+                    //MOUSE BUTTON RELEASED ACTIONS
+                    if(UIState->InteractingWith) {
+                        ui_element *InteractEnt = UIState->InteractingWith;
+                        switch(InteractEnt->Type) {
+                            case UI_DropDownBox: {
+                                ui_element *Parent = InteractEnt->Parent;
+                                
+                                //VIEW
+                                Parent->Set.Name = InteractEnt->Set.Name;
+                                
+                                //DATA
+                                enum_array_data *ValueToMod = (enum_array_data *)InteractEnt->Set.ValueLinkedToPtr;
+                                
+                                *ValueToMod = InteractEnt->Set.EnumArray;
+                                
+                                //Show Active
+                                Parent->Set.Active = !Parent->Set.Active;
+                            } break;
+                            case UI_Moveable: {
+                                
+                            } break;
+                            case UI_Button: {
+                                // TODO(Oliver): Can we make this more generic?
+                                if(DoStringsMatch(InteractEnt->Set.Type, "Save Level")) {
+                                    SaveLevelToDisk(Memory, GameState, "level1.omm");
+                                }
+                            } break;
+                            case UI_Entity: {
+                                GetEntityFromElement(UIState);
+                                if(IsValidGridPosition(GameState, Entity->Pos)) {
+                                    //Success! Do nothing.
+                                } else {
+                                    Entity->Pos
+                                        = Entity->RollBackPos;
+                                }
+                                
+                            } break;
+                            case UI_CheckBox: {
+                                b32 Value = *((b32 *)InteractEnt->Set.ValueLinkedToPtr);
+                                *(b32 *)InteractEnt->Set.ValueLinkedToPtr = !Value;
+                            } break;
+                            case UI_DropDownBoxParent: {
+                                InteractEnt->Set.Active = !InteractEnt->Set.Active;
+                            } break;
+                            default: {
+                                AddToOutBuffer("There is no release interaction for the object type \"%s\"\n", element_ui_type_Names[InteractEnt->Type]);
+                            }
+                        }
+                        
+                        UIState->InteractingWith = 0;
+                    }
+                }
+                
+                if(UIState->InteractingWith) {
+                    //MOUSE BUTTON DOWN ACTIONS
+                    
+                    ui_element *Interact = UIState->InteractingWith;
+                    switch(UIState->InteractingWith->Type) {
                         case UI_Entity: {
                             GetEntityFromElement(UIState);
-                            if(IsValidGridPosition(GameState, Entity->Pos)) {
-                                //Success! Do nothing.
+                            if(Entity->Type == Entity_Block) {
+                                SetChunkType(GameState, Entity->Pos, ChunkMain);
+                                
+                                Entity->Pos = WorldChunkInMeters*GetGridLocationR32(MouseP_PerspectiveSpace + CamPos);
+                                
+                                
+                                SetChunkType(GameState, Entity->Pos, ChunkBlock);
                             } else {
-                                Entity->Pos
-                                    = Entity->RollBackPos;
+                                AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", entity_type_Names[Entity->Type]);
                             }
                             
                         } break;
-                        case UI_CheckBox: {
-                            b32 Value = *((b32 *)InteractEnt->Set.ValueLinkedToPtr);
-                            *(b32 *)InteractEnt->Set.ValueLinkedToPtr = !Value;
-                        } break;
-                        case UI_DropDownBoxParent: {
-                            InteractEnt->Set.Active = !InteractEnt->Set.Active;
+                        case UI_Moveable:{
+                            Interact->Parent->Set.Pos = MouseP_OrthoSpace;
                         } break;
                         default: {
-                            AddToOutBuffer("There is no release interaction for the object type \"%s\"\n", element_ui_type_Names[InteractEnt->Type]);
+                            AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", element_ui_type_Names[Interact->Type]); //TODO(oliver): Maybe GetEnumAlias(entity_type, TypeValue); ?
                         }
                     }
-                    
-                    UIState->InteractingWith = 0;
                 }
-            }
-            
-            if(UIState->InteractingWith) {
-                //MOUSE BUTTON DOWN ACTIONS
                 
-                ui_element *Interact = UIState->InteractingWith;
-                switch(UIState->InteractingWith->Type) {
-                    case UI_Entity: {
-                        GetEntityFromElement(UIState);
-                        if(Entity->Type == Entity_Block) {
-                            SetChunkType(GameState, Entity->Pos, ChunkMain);
-                            
-                            Entity->Pos = WorldChunkInMeters*GetGridLocationR32(MouseP_PerspectiveSpace + CamPos);
-                            
-                            
-                            SetChunkType(GameState, Entity->Pos, ChunkBlock);
-                        } else {
-                            AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", entity_type_Names[Entity->Type]);
-                        }
-                        
-                    } break;
-                    case UI_Moveable:{
-                        Interact->Parent->Set.Pos = MouseP_OrthoSpace;
-                    } break;
-                    default: {
-                        AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", element_ui_type_Names[Interact->Type]); //TODO(oliver): Maybe GetEnumAlias(entity_type, TypeValue); ?
-                    }
-                }
-            }
-            
-            ////////////Hover Indication /////////////////////
-            ui_element *Elm = GameState->UIState->InteractingWith;
-            render_group *ThisRenderGroup = OrthoRenderGroup;
-            if(Elm) {
-                Assert(Elm->IsValid);
-                rect2 ElmAsRect = Rect2MinDim(Elm->Set.Pos, Elm->Set.Dim);
-                if(Elm->Type == UI_Entity) {
-                    ThisRenderGroup = RenderGroup;
-                    GetEntityFromElement_(Elm);
-                    v2 ElmRelP = Entity->Pos - CamPos;
-                    ElmAsRect = Rect2MinDim(ElmRelP, Entity->Dim);
-                }
-                PushRectOutline(ThisRenderGroup, ElmAsRect, 1, V4(1.0f, 0, 0, 1)); 
-            } else if(NextHotEntity){
-                Elm = NextHotEntity;
-                if(Elm->IsValid) {
+                ////////////Hover Indication /////////////////////
+                ui_element *Elm = GameState->UIState->InteractingWith;
+                render_group *ThisRenderGroup = OrthoRenderGroup;
+                if(Elm) {
+                    Assert(Elm->IsValid);
                     rect2 ElmAsRect = Rect2MinDim(Elm->Set.Pos, Elm->Set.Dim);
                     if(Elm->Type == UI_Entity) {
                         ThisRenderGroup = RenderGroup;
                         GetEntityFromElement_(Elm);
                         v2 ElmRelP = Entity->Pos - CamPos;
                         ElmAsRect = Rect2MinDim(ElmRelP, Entity->Dim);
-                    } 
+                    }
+                    PushRectOutline(ThisRenderGroup, ElmAsRect, 1, V4(1.0f, 0, 0, 1)); 
+                } else if(NextHotEntity){
+                    Elm = NextHotEntity;
+                    if(Elm->IsValid) {
+                        rect2 ElmAsRect = Rect2MinDim(Elm->Set.Pos, Elm->Set.Dim);
+                        if(Elm->Type == UI_Entity) {
+                            ThisRenderGroup = RenderGroup;
+                            GetEntityFromElement_(Elm);
+                            v2 ElmRelP = Entity->Pos - CamPos;
+                            ElmAsRect = Rect2MinDim(ElmRelP, Entity->Dim);
+                        } 
+                        
+                        PushRectOutline(ThisRenderGroup, ElmAsRect, 1, V4(0.2f, 0, 1, 1)); 
+                    }
+                } else {
+                    v2 Cell = GetGridLocationR32(MouseP_PerspectiveSpace + Camera->Pos);
                     
-                    PushRectOutline(ThisRenderGroup, ElmAsRect, 1, V4(0.2f, 0, 1, 1)); 
+                    v2 ElmRelP = WorldChunkInMeters*Cell - CamPos;
+                    
+                    rect2 ElmAsRect = Rect2MinDim(ElmRelP, V2(WorldChunkInMeters, WorldChunkInMeters));
+                    
+                    PushRectOutline(RenderGroup, ElmAsRect, 1, V4(0.5f, 1, 0, 1)); 
                 }
-            } else {
-                v2 Cell = GetGridLocationR32(MouseP_PerspectiveSpace + Camera->Pos);
-                
-                v2 ElmRelP = WorldChunkInMeters*Cell - CamPos;
-                
-                rect2 ElmAsRect = Rect2MinDim(ElmRelP, V2(WorldChunkInMeters, WorldChunkInMeters));
-                
-                PushRectOutline(RenderGroup, ElmAsRect, 1, V4(0.5f, 1, 0, 1)); 
             }
-            
-            PushBitmap(RenderGroup, V3(MouseP_PerspectiveSpace, 1), &GameState->MagicianHandBitmap, 1.0f, BufferRect);
-            
             if(GameState->PlayerIsSettingPath) {
                 if(GameState->PathToSet.Count > 0) {
 #define RENDER_CONTROL_PATH_ORTHO 0
@@ -2088,15 +2200,18 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
 #endif
                 }
             }
+            
+            if(GameState->RenderConsole) {
+                RenderConsole(&DebugConsole, dt); 
+            }
+            
+            PushBitmap(OrthoRenderGroup, V3(MouseP_OrthoSpace, 1), &GameState->MagicianHandBitmap, 100.0f, BufferRect);
+            
             ///////////////////
             
         } //END OF PLAY_MODE 
     } //switch on GAME_MODE
     
-    
-    if(GameState->RenderConsole) {
-        RenderConsole(&DebugConsole, dt); 
-    }
     
     //RenderGroupToOutput(RenderGroup);
     //RenderGroupToOutput(&OrthoRenderGroup);

@@ -30,6 +30,16 @@ Sin(r32 Value)
     return Result;
 }
 
+inline r32 ATan2_0toTau(r32 Y, r32 X) {
+    r32 Result = (r32)atan2(Y, X);
+    if(Result < 0) {
+        Result += TAU32;
+    }
+    
+    Assert(Result >= 0 && Result <= TAU32);
+    return Result;
+}
+
 inline r32
 SqrRoot(r32 Value)
 {
