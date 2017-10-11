@@ -60,6 +60,7 @@ typedef s32 int32;
 typedef s64 int64;
 
 typedef intptr_t intptr;
+typedef uintptr_t uintptr;
 
 typedef b32 bool32;
 
@@ -68,6 +69,9 @@ struct v2
 {
     union
     {
+        struct {
+            r32 E[2];
+        };
         struct
         {
             r32 X, Y;
@@ -76,6 +80,7 @@ struct v2
         {
             r32 U, V;
         };
+        
     };
 };
 
@@ -90,6 +95,9 @@ struct v2i
         struct
         {
             s32 U, V;
+        };
+        struct{
+            s32 E[2];
         };
     };
 };
@@ -126,6 +134,12 @@ struct v2i
 #define forNs(Count) forN_s(Count, ##Count##Index)
 #define Flip(Value) Value = !Value
 
+#define DEFAULT_ALIGNMENT 4
+
+#define Align(Value, n) ((Value + (n - 1)) & ~(n - 1))
+#define Align16(Value) (((Value) + 15) & (~15))
+#define Align4(Value) (((Value) + 3) & (~3))
+#define Align8(Value) Align(Value, 8)
 
 #if INTERNAL_BUILD
 #define Assert(Condition) {if(!(Condition)){ u32 *ATemp_ = (u32 *)0; *ATemp_ = 0;}}
@@ -142,7 +156,7 @@ struct v2i
 #define SLEEP 1
 #endif
 
-
+#include <intrin.h>
 #include "calm_intrinsics.h"
 #include "calm_math.h"
 #include "calm_print.cpp"
@@ -236,6 +250,8 @@ ClearMemoryU32(void *Memory, u32 Size, u32 ClearValue)
     }
 }
 
+#define ClearArray(Memory, Type, Length) ClearMemory(Memory, sizeof(Type)*Length, 0)
+
 #define CopyArray(Source, Dest, Type, Count) MemoryCopy(Source, Dest, sizeof(Type)*Count);
 
 inline void
@@ -323,6 +339,14 @@ struct game_button
     b32 FrameCount;
 };
 
+typedef struct game_output_sound_buffer
+{
+    int16 *Samples;
+    int32 SampleRate;
+    int32 SamplesToWrite;
+    
+} game_output_sound_buffer;
+
 struct font;
 struct game_memory
 {
@@ -387,29 +411,62 @@ struct temp_memory
     
     u32 ID;
 };
+#define PushStruct(Memory, type, ...) (type *)PushSize_(Memory, sizeof(type), ##__VA_ARGS__)
+#define PushArray(Memory, type, size, ...) (type *)PushSize_(Memory, size * (sizeof(type)), ##__VA_ARGS__)
+#define PushSize(Memory, size, ...) PushSize_(Memory, size, ##__VA_ARGS__)
+#define PushCopy(Arena, Source, Size, ...) Copy(Source, PushSize_(Arena, Size, ##__VA_ARGS__), Size);
 
-#define PushArray(Arena, Type, Size, ...) (Type *)PushSize(Arena, Size*sizeof(Type), __VA_ARGS__)
-#define PushStruct(Arena, Type) (Type *)PushSize(Arena, sizeof(Type))
+inline uint32
+GetAlignmentOffset(memory_arena *Arena, uint32 Alignment)
+{
+    uintptr MemoryPtr = (uintptr)(((u8 *)Arena->Base) + Arena->CurrentSize);
+    
+    uint32 Result = 0;
+    if((MemoryPtr & (Alignment - 1)) != 0)
+    {
+        Result = Alignment - (MemoryPtr & (Alignment - 1));
+        
+    }
+    
+    return Result;
+}
+
+inline size_t GetEffectiveSizeFor(memory_arena *Arena, size_t Size, u32 Alignment = DEFAULT_ALIGNMENT)
+{
+    uint32 AlignmentOffset = GetAlignmentOffset(Arena, Alignment);
+    
+    size_t EffectiveSize = Size + AlignmentOffset;
+    
+    return EffectiveSize;
+}
+
+inline b32
+ArenaHasRoomFor(memory_arena *Arena, size_t Size, uint32 Alignment = DEFAULT_ALIGNMENT)
+{
+    size_t EffectiveSize = GetEffectiveSizeFor(Arena, Size, Alignment);
+    
+    b32 Result  = (Arena->CurrentSize + EffectiveSize) <= Arena->TotalSize;
+    
+    return Result;
+}
 
 
 inline void *
-PushSize(memory_arena *Arena, size_t Size, b32 Clear = true)
+PushSize_(memory_arena *Arena, size_t Size_, uint32 Alignment_ = DEFAULT_ALIGNMENT)
 {
-    Assert((Arena->CurrentSize + Size) <= Arena->TotalSize);
-    void *Result = (void *)((u8 *)Arena->Base + Arena->CurrentSize);
-    Arena->CurrentSize += Size;
     
-    if(Clear)
-    {
-        size_t ClearSize = Size;
-        u8 *Memory = (u8 *)Result; 
-        while(ClearSize--)
-        {
-            *Memory++ = 0;
-        }
-    }    
+    size_t EffectiveSize = GetEffectiveSizeFor(Arena, Size_, Alignment_);
+    
+    Assert((Arena->CurrentSize + EffectiveSize) <= Arena->TotalSize);
+    
+    u32 AlignmentOffset = GetAlignmentOffset(Arena, Alignment_);
+    void *Result = (void *)(((u8 *)Arena->Base) + Arena->CurrentSize + AlignmentOffset);
+    
+    Assert(((uintptr)Result & (Alignment_ - 1)) == 0);
+    
+    Arena->CurrentSize += EffectiveSize;
+    
     return Result;
-    
 }
 
 

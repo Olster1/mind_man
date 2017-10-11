@@ -234,7 +234,8 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
                     v2 MinP = Info->Pos;
                     v2 MaxP = MinP + Info->Dim; 
                     
-                    if(Bitmap->LoadState == RESOURCE_LOADED) {
+                    if(Bitmap->LoadState == RESOURCE_LOADED) 
+                    {
                         Assert(Bitmap->Handle);
                         glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
                         

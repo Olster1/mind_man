@@ -88,7 +88,7 @@ enum chunk_type {
 #include "calm_bucket.cpp"
 #include "calm_random.h"
 #include "calm_console.h"
-#include "calm_sound.h"
+#include "calm_audio.h"
 #include "calm_particles.h"
 #include "calm_animation.h"
 #include "calm_entity.h"
@@ -158,6 +158,9 @@ struct game_state
     memory_arena RenderArena;
     memory_arena StringArena;
     memory_arena ThreadArenas[16];
+    memory_arena TransientArena;
+    
+    audio_state AudioState;
     
     playing_sound *PlayingSounds;
     playing_sound *PlayingSoundsFreeList;

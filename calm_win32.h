@@ -16,17 +16,14 @@ struct offscreen_buffer
     
 };
 
-struct sound_info
-{
-    u32 NumberOfChannels;
-    u32 BitsPerSample;
-    u32 BytesPerSingleChannelSamples;
-    u32 BytesPerSampleForBothChannels;
-    u32 SamplesPerSec;
-    u32 BytesPerSec;
-    u32 BufferLengthInBytes;
-    u32 BytesPerFrame;
-    u32 BufferByteAt;
+struct Win32SoundOutput{
+    int32 sampleRate;
+    int32 RunningSampleIndex;
+    uint8 BytesPerSample;
+    uint32 SizeOfBuffer;
+    DWORD BytesPerFrame;
+    uint32 SamplesPerFrame;
+    uint32 SafetyBytes;
 };
 
 struct win32_dimension

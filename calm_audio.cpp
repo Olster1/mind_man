@@ -6,6 +6,219 @@
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
 
+#define CharToUInt(a, b, c, d) (((uint32)(a) << 0) |  ((uint32)(b) << 8) |((uint32)(c) << 16) | ((uint32)(d) << 24))
+
+enum wav_ID
+{
+    RIFF = CharToUInt('R', 'I', 'F', 'F'),
+    WAVE = CharToUInt('W', 'A', 'V', 'E'),
+    FMT = CharToUInt('f', 'm', 't', ' '),
+    DATA = CharToUInt('d', 'a', 't', 'a'),
+    
+};
+
+#pragma pack(push, 1)
+struct RIFF_header
+{
+    uint32 RIFF;
+    uint32 FileLength;
+    uint32 WAVE;
+};
+
+struct chunk_header
+{
+    uint32 ID;
+    uint32 Size;
+};
+
+struct wav_format_chunk
+{
+    uint16 FormatTag;
+    uint16 nChannels;
+    uint32 nSamplesPerSec;
+    uint32 nAvgBytesPerSec;
+    uint16 nBlockAlign;
+    uint16 wBitsPerSample;
+    uint16 cbSize;
+    uint16 ValidBitsPerSample;
+    uint32 dwChannelMask;
+    uint8 SubFormat[16];
+    
+};
+
+#pragma pack(pop)
+
+
+struct iterator
+{
+    chunk_header *CurrentChunk;
+    uint8 *At;
+    uint8 *StopAt;
+    
+};
+
+inline iterator
+BeginAt(void *StartAt, uint32 FileSize)
+{
+    iterator Result = {};
+    
+    Result.CurrentChunk = (chunk_header *)StartAt;
+    Result.At = (uint8 *)StartAt;
+    Result.StopAt = Result.At + FileSize;
+    
+    
+    return Result;
+}
+
+inline bool32
+IsValid(iterator *Iter)
+{
+    bool32 Result = (Iter->At < Iter->StopAt);
+    
+    return Result;
+}
+
+inline void
+NextChunk(iterator *Iter)
+{
+    uint32 Size = (Iter->CurrentChunk->Size + 1) & ~1;
+    Iter->At += Size + sizeof(chunk_header);
+    Iter->CurrentChunk = (chunk_header *)(Iter->At);
+    
+}
+
+inline void *
+GetChunkData(iterator *Iter)
+{
+    void *Result = (void *)(Iter->CurrentChunk + 1);
+    return Result;
+}
+
+internal loaded_sound
+LoadWavFileDEBUG(game_memory *Memory, char *FileName, u32 StartSampleIndex, u32 EndSampleIndex, memory_arena *Arena)
+{
+    loaded_sound Result = {};
+    
+    //sound_asset *MetaData = GetSound(Assets, FileName);
+    
+    size_t FileSize = Memory->PlatformFileSize(FileName);
+    void *AllocatedMemory = PushSize(Arena, FileSize);
+    
+    game_file_handle FileHandle = Memory->PlatformBeginFile(FileName);
+    
+    file_read_result ReadResult = Memory->PlatformReadFile(FileHandle, AllocatedMemory, FileSize, 0);
+    
+    Memory->PlatformEndFile(FileHandle);
+    
+    if(ReadResult.Data)
+    {
+        
+        RIFF_header *Header = (RIFF_header *)ReadResult.Data;
+        
+        Assert(Header->RIFF == RIFF);        
+        Assert(Header->WAVE == WAVE);
+        
+        int16 *SampleData = 0;
+        uint16 NumberOfChannels = 0;
+        uint32 TotalSizeOfSamples = 0;
+        
+        for(iterator Iter = BeginAt((Header + 1), Header->FileLength - 4);
+            IsValid(&Iter);
+            NextChunk(&Iter))
+        {
+            switch(Iter.CurrentChunk->ID)
+            {
+                case FMT:
+                {
+                    Assert(Iter.CurrentChunk->ID == FMT);
+                    
+                    wav_format_chunk *Format = (wav_format_chunk *)GetChunkData(&Iter);
+                    Assert(Format->wBitsPerSample == 16);
+                    Assert(Format->FormatTag == 1);
+                    Assert(Format->nSamplesPerSec == 48000);
+                    Assert(Format->nChannels == 1 || Format->nChannels == 2);  
+                    
+                    NumberOfChannels = Format->nChannels;
+                    
+                    
+                } break;
+                
+                case DATA:
+                {
+                    Assert(Iter.CurrentChunk->ID == DATA);
+                    TotalSizeOfSamples = Iter.CurrentChunk->Size;
+                    
+                    SampleData = (int16 *)GetChunkData(&Iter);
+                    
+                } break;
+                
+                default :
+                {
+                    
+                }
+            }
+            
+        }
+        
+        
+        Result.SampleCount = TotalSizeOfSamples / (NumberOfChannels*sizeof(int16));
+        Result.NumberOfChannels = NumberOfChannels;
+        
+        
+        if(Result.NumberOfChannels == 1)
+        {
+            Result.Samples[0] = (int16 *)SampleData;
+            Result.Samples[1] = (int16 *)SampleData;
+            
+        }
+        else if(Result.NumberOfChannels == 2)
+        {
+            
+            for(u32 SampleIndex = 0;
+                SampleIndex < Result.SampleCount;
+                ++SampleIndex)
+            {
+                SampleData[SampleIndex] = SampleData[2*SampleIndex];
+            }
+            
+            Result.Samples[0] = (int16 *)SampleData;
+            Result.Samples[1] = (int16 *)SampleData;
+        }
+        else
+        {
+            Assert(!"Number of channels not supported!");
+        }
+        
+        
+        if(EndSampleIndex != 0)
+        {
+            Assert(EndSampleIndex <= Result.SampleCount);
+            Result.SampleCount = EndSampleIndex - StartSampleIndex;
+            
+            Result.Samples[0] = (int16 *)(SampleData + StartSampleIndex);
+            Result.Samples[1] = (int16 *)(SampleData + StartSampleIndex);
+            
+        }
+        else
+        {
+            u32 AlignedSampleCount = Align4(Result.SampleCount);
+            
+            for(u32 SampleIndex = Result.SampleCount;
+                SampleIndex < AlignedSampleCount;
+                ++SampleIndex)
+            {
+                SampleData[SampleIndex] = 0;
+            }
+            
+            Result.SampleCount = AlignedSampleCount;
+        }
+    }
+    
+    return Result;
+    
+}
+
+
 internal void
 InitializeAudioState(audio_state *AudioState, memory_arena *Arena)
 {
@@ -15,45 +228,15 @@ InitializeAudioState(audio_state *AudioState, memory_arena *Arena)
     AudioState->PermArena = Arena;
 }
 
-inline sound_ID
-GetNextSoundID(sound_ID SoundID, hha_sound_info *SoundInfo)
-{
-    sound_ID Result = {};
-    switch(SoundInfo->SoundChain)
-    {
-        case SoundChain_None:
-        {
-            //NOTE(oliver): Nothing to do.
-        } break;
-        
-        case SoundChain_Repeat:
-        {
-            Result = SoundID;
-        } break;
-        
-        case SoundChain_Advance:
-        {
-            Result = {SoundID.Value + 1};            
-        } break;
-        
-        default:
-        {
-            InvalidCodePath;
-        }
-        
-    }
-    
-    return Result;
-}
 
 
 internal void
-MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
+MixPlayingSounds(game_output_sound_buffer *SoundBuffer, audio_state *AudioState,
                  memory_arena *TempArena)
 {
     
     __m128i *StartAddress = (__m128i *)SoundBuffer->Samples;
-    temporary_memory SoundBufferMem = BeginTemporaryMemory(TempArena);
+    temp_memory SoundBufferMem = MarkMemory(TempArena);
     
     Assert((SoundBuffer->SamplesToWrite & 7) == 0);
     
@@ -61,14 +244,12 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
     
     uint32 Size = (SoundBuffer->SamplesToWrite * sizeof(int16));
     Size = (Size + 15) & ~15;
-    __m128 *Samples0 = (__m128 *)PushArray(TempArena, Size, real32, 16);
-    __m128 *Samples1 = (__m128 *)PushArray(TempArena, Size, real32, 16);
+    __m128 *Samples0 = (__m128 *)PushArray(TempArena, real32, Size, 16);
+    __m128 *Samples1 = (__m128 *)PushArray(TempArena, real32, Size, 16);
     
     __m128 Zero = _mm_set1_ps(0.0f);
     
     uint32 Size_4 = Size / 4;
-    
-    u32 GenerationID = BeginGeneration(Assets); 
     
     for(uint32 SampleIndex = 0;
         SampleIndex < Size_4;
@@ -100,21 +281,22 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
             
             if(Sound)
             {
-                hha_sound_info *SoundInfo = GetSoundInfo(Assets, PlayingSound->ID);
+#if 0
+                openhha_sound_info *SoundInfo = GetSoundInfo(Assets, PlayingSound->ID);
                 
                 sound_ID NextSoundID = GetNextSoundID(PlayingSound->ID, SoundInfo);
                 
                 PrefetchSound(Assets, NextSoundID);
+#endif
+                v2 dVolumePerSample = Inv_SamplesPerSecond*PlayingSound->dCurrentVolumes;
                 
-                v2 dVolumePerSample = PlayingSound->dCurrentVolumes * Inv_SamplesPerSecond;
-                
-                Assert(PlayingSound->CursorPos >= 0.0f && PlayingSound->CursorPos <= SoundInfo->SampleCount);
+                Assert(PlayingSound->CursorPos >= 0.0f && PlayingSound->CursorPos <= Sound->SampleCount);
                 Assert(PlayingSound->dSample >= 0.0f);
                 
                 
                 uint32 SamplesToWrite = TotalSamplesLeftToWrite;
-                real32 SamplesLeftInSoundFloat = ((real32)SoundInfo->SampleCount - PlayingSound->CursorPos) / PlayingSound->dSample;
-                uint32 SamplesLeftInSound = Align4(CeilReal32ToInt32(SamplesLeftInSoundFloat));
+                real32 SamplesLeftInSoundFloat = ((real32)Sound->SampleCount - PlayingSound->CursorPos) / PlayingSound->dSample;
+                uint32 SamplesLeftInSound = Align4(CeilRealToInt32(SamplesLeftInSoundFloat));
                 
                 if(SamplesLeftInSound < SamplesToWrite)
                 {
@@ -147,7 +329,7 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
                 }
                 
                 
-#define Mi(Value, Index) (((uint32 *)&Value)[Index])
+                //#define Mi(Value, Index) (((uint32 *)&Value)[Index])
                 
                 v2 Volumes = PlayingSound->CurrentVolumes;
                 
@@ -253,7 +435,7 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
                 TotalSamplesLeftToWrite -= SamplesToWrite;
                 
                 for(u32 ChannelIndex = 0;
-                    ChannelIndex < SoundInfo->NumberOfChannels;
+                    ChannelIndex < Sound->NumberOfChannels;
                     ++ChannelIndex)
                 {
                     if(VolumeChangeEnded[ChannelIndex])
@@ -266,35 +448,16 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
                 
                 if(SamplesLeftInSound == SamplesToWrite)
                 {
-                    if(NextSoundID.Value)
-                    {
-                        Assert(PlayingSound->CursorPos >= (real32)(SoundInfo->SampleCount));
-                        
-                        PlayingSound->ID = NextSoundID;
-                        PlayingSound->CursorPos -= (real32)SoundInfo->SampleCount;
-                        if(PlayingSound->CursorPos < 0)
-                        {
-                            PlayingSound->CursorPos = 0;
-                        }
-                    }
-                    else
-                    {
-                        SoundFinished = true;
-                        PlayingSound->CursorPos = 0;
-                    }
+                    SoundFinished = true;
+                    PlayingSound->CursorPos = 0;
                 }
-                Assert(PlayingSound->CursorPos >= 0.0f && PlayingSound->CursorPos <= SoundInfo->SampleCount);
+                Assert(PlayingSound->CursorPos >= 0.0f && PlayingSound->CursorPos <= Sound->SampleCount);
                 
                 
-            }
-            else
-            {
-                LoadSound(Assets, PlayingSound->ID);
-                break;
             }
         }
         
-        if(SoundFinished)
+        if(SoundFinished && !PlayingSound->Loop)
         {
             playing_sound *Next = PlayingSound->NextSound;
             
@@ -302,7 +465,6 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
             AudioState->FreePlayingSound = PlayingSound;
             
             *PlayingSoundPtr = Next;
-            
         }
         
         else
@@ -336,18 +498,15 @@ MixPlayingSounds(game_sound_buffer *SoundBuffer, audio_state *AudioState,
         _mm_store_si128((__m128i *)StartAddress++, Packed);
         
     }
-    EndTemporaryMemory(&SoundBufferMem);
-    EndGeneration(Assets, GenerationID);
+    ReleaseMemory(&SoundBufferMem);
     
 }
 
 
 
 internal playing_sound *
-PlaySound(audio_state *AudioState, sound_ID ID)
+PlaySound(audio_state *AudioState, loaded_sound *Sound)
 {
-    TIMED_FUNCTION();
-    
     if(!AudioState->FreePlayingSound)
     {
         AudioState->FreePlayingSound = PushStruct(AudioState->PermArena, playing_sound);
@@ -357,15 +516,13 @@ PlaySound(audio_state *AudioState, sound_ID ID)
     playing_sound *PlayingSound = AudioState->FreePlayingSound;
     AudioState->FreePlayingSound = PlayingSound->NextSound;
     
-    PlayingSound->ID = ID;
+    PlayingSound->Sound = Sound;
     PlayingSound->CursorPos = 0;
     
     PlayingSound->CurrentVolumes = V2(1, 1);
     PlayingSound->TargetVolumes = V2(1, 1);
     PlayingSound->dCurrentVolumes = V2(0, 0);
-    PlayingSound->dSample = 1.1f;
-    
-    
+    PlayingSound->dSample = 1.0f;
     
     PlayingSound->NextSound = AudioState->FirstPlayingSound;
     
@@ -434,3 +591,12 @@ GameOutputSound(game_state *GameState, game_output_sound_buffer *soundBuffer){
     
 }
 
+
+internal void GameGetSoundSamples(game_memory *Memory, game_output_sound_buffer *SoundBuffer)
+{
+    
+    game_state *GameState = (game_state *)Memory->GameStorage;
+    
+    MixPlayingSounds(SoundBuffer, &GameState->AudioState,
+                     &GameState->TransientArena);
+}

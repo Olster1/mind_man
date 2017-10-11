@@ -7,7 +7,7 @@
    ======================================================================== */
 
 #include "calm_game.h"
-#include "calm_sound.cpp"
+#include "calm_audio.cpp"
 #include "calm_render.cpp"
 #include "calm_menu.cpp"
 #include "calm_console.cpp"
@@ -285,7 +285,8 @@ struct search_info {
 
 inline void InitSearchInfo(search_info *Info,  game_state *GameState, memory_arena *TempArena) {
     Info->SearchCellList = 0;
-    Info->VisitedHash = PushArray(TempArena, world_chunk *, ArrayCount(GameState->Chunks), true);
+    Info->VisitedHash = PushArray(TempArena, world_chunk *, ArrayCount(GameState->Chunks));
+    ClearArray(Info->VisitedHash, world_chunk *, ArrayCount(GameState->Chunks));
     
     Info->Sentinel = &GameState->SearchCellSentinel;
     
@@ -961,7 +962,11 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         //for stb_image so the images aren't upside down.
         stbi_set_flip_vertically_on_load(true);
         //
+        
+        Assert(sizeof(game_state) < Memory->GameStorageSize);
         InitializeMemoryArena(&GameState->MemoryArena, (u8 *)Memory->GameStorage + sizeof(game_state), Memory->GameStorageSize - sizeof(game_state));
+        
+        
         
         GameState->PerFrameArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
         
@@ -970,6 +975,10 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->RenderArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(2));
         
         GameState->StringArena = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
+        GameState->TransientArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(3));
+        
+        GameState->AudioState = {};
+        GameState->AudioState.PermArena = &GameState->TransientArena;
         
         for(u32 i = 0; i < ArrayCount(GameState->ThreadArenas); ++i) {
             GameState->ThreadArenas[i] = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
@@ -981,9 +990,12 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->RenderConsole = true;
         
+        
+        //"Moonlight_Hall.wav","Faro.wav" podcast1.wav
+        GameState->BackgroundMusic = LoadWavFileDEBUG(Memory, "mountain_wind1.wav", 0, 0, &GameState->MemoryArena);
+        playing_sound *SoundInstance = PlaySound(&GameState->AudioState, &GameState->BackgroundMusic);
+        SoundInstance->Loop = true;
 #if 0
-        //"Moonlight_Hall.wav","Faro.wav"
-        GameState->BackgroundMusic = LoadWavFileDEBUG(Memory, "podcast1.wav", &GameState->MemoryArena);
         //PushSound(GameState, &GameState->BackgroundMusic, 1.0, false);
         GameState->FootstepsSound[0] = LoadWavFileDEBUG(Memory, "foot_steps_sand1.wav", &GameState->MemoryArena);
         
@@ -1021,6 +1033,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         
         GameState->KnightAnimationCount = 0;
+        
+        GameState->CheckPointCount++;
         
         char *BaseName = "knight/knight iso char_";
         //char *BaseName = "knight iso char_";
@@ -1581,7 +1595,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 
                                 b32 DidMove = UpdateEntityPositionViaFunction(GameState, Entity, dt);
                                 if(DidMove) {
-                                    PushSound(GameState, &GameState->FootstepsSound[Entity->WalkSoundAt++], 1.0, false);
+                                    PlaySound(&GameState->AudioState, &GameState->FootstepsSound[Entity->WalkSoundAt++]);
                                     if(Entity->WalkSoundAt >= 2) {
                                         Entity->WalkSoundAt = 0;
                                     }
@@ -1976,59 +1990,79 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                         v2i Cell = GetGridLocation(MouseP_PerspectiveSpace + Camera->Pos);
                         world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, 0, ChunkNull);
                         
-                        enum_array_data *Info = &UIState->InitInfo;
-                        char *A = Info->Type;
-                        if(A) {
-                            if(Chunk) {
-                                
-                                if(DoStringsMatch(A, "entity_type")) {
-                                    CastValue(Info, entity_type);
-                                    v2 Pos = WorldChunkInMeters*V2i(Cell);
-                                    entity *Ent = GetEntityAnyType(GameState, Pos);
-                                    if(Ent) {
-                                        if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
-                                            if(Ent->Type == Entity_Block) {
-                                                Chunk->Type = Chunk->MainType;
-                                            }
-                                            RemoveEntity(GameState, Ent->Index);
-                                        }
-                                    } else {
-                                        if(Value == Entity_Chunk_Changer) {
-                                            entity *Entity = InitEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
-                                            Entity->LoopChunks = true;
-                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                            AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                        } else {
-                                            AddEntity(GameState, Pos, Value);
-                                        }
-                                    }
-                                } 
-                            } 
-                            
-                            if(DoStringsMatch(A, "chunk_type")) {
-                                CastValue(Info, chunk_type);
-                                
-                                if(Chunk && Chunk->Type == Value) {
-                                    RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
-                                } else {
-                                    if(!Chunk) {
-                                        Assert(Value != ChunkNull);
-                                        Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
-                                    } 
-                                    
-                                    Chunk->Type = Value;
-                                }
-                            }
+                        if(UIState->CurrentCheckPointParent) {
+                            check_point_parent *Parent = UIState->CurrentCheckPointParent;
+                            Assert(Parent->Count < ArrayCount(Parent->CheckPoints));
+                            check_point *Point = Parent->CheckPoints + Parent->Count++;
+                            Point->Pos = Cell;
                         } else {
-                            AddToOutBuffer("No Entity type selected\n");
+                            enum_array_data *Info = &UIState->InitInfo;
+                            char *A = Info->Type;
+                            if(A) {
+                                if(Chunk) {
+                                    if(DoStringsMatch(A, "entity_type")) {
+                                        CastValue(Info, entity_type);
+                                        v2 Pos = WorldChunkInMeters*V2i(Cell);
+                                        entity *Ent = GetEntityAnyType(GameState, Pos);
+                                        if(Ent) {
+                                            if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
+                                                if(Ent->Type == Entity_Block) {
+                                                    Chunk->Type = Chunk->MainType;
+                                                }
+                                                RemoveEntity(GameState, Ent->Index);
+                                            }
+                                        } else {
+                                            if(Value == Entity_Chunk_Changer) {
+                                                entity *Entity = InitEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
+                                                Entity->LoopChunks = true;
+                                                
+                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                                //This should all be done via the GUI system. After you create the
+                                                //entity maybe you can then select them and see the attributes and 
+                                                //change them as neccessary! Oliver 8/10/17
+                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                            } else if(Value == Entity_CheckPoint) {
+                                                u32 CheckPointIndex = GameState->CheckPointCount++;
+                                                check_point_parent *Parent = GameState->CheckPointParents + CheckPointIndex;
+                                                Parent->Count = 0;
+                                                UIState->CurrentCheckPointParent = Parent;
+                                                entity *Entity = FindFirstEntityOfType(GameState, Entity_Philosopher);
+                                                Entity->CheckPointParentAt = CheckPointIndex;
+                                                Entity->CheckPointAt = 0;
+                                                
+                                            } else {
+                                                AddEntity(GameState, Pos, Value);
+                                            }
+                                        }
+                                    } 
+                                } 
+                                
+                                if(DoStringsMatch(A, "chunk_type")) {
+                                    CastValue(Info, chunk_type);
+                                    
+                                    if(Chunk && Chunk->Type == Value) {
+                                        RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
+                                    } else {
+                                        if(!Chunk) {
+                                            Assert(Value != ChunkNull);
+                                            Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
+                                        } 
+                                        
+                                        Chunk->Type = Value;
+                                    }
+                                }
+                            } else {
+                                AddToOutBuffer("No Entity type selected\n");
+                            }
                         }
                     } else { //Picking up entities with mouse. 
+                        UIState->CurrentCheckPointParent = 0;
                         
                         if(!UIState->InteractingWith) {
                             if(!NextHotEntity) {
