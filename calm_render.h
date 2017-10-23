@@ -53,7 +53,7 @@ struct render_element_rect_outline
 
 struct transform {
     v2 Scale; 
-    v2 Rotation;
+    mat2 Rotation;
     v2 Offset;
 };
 

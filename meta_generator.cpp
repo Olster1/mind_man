@@ -67,6 +67,7 @@ enum file_handle {
     KEY_TYPES_FILE, 
     META_FILE,
     ENUM_STRUCTS,
+    INTROSPECT_STRUCTS,
     
     FILE_HANDLE_COUNT
 };
@@ -322,6 +323,7 @@ static token GetNextToken(tokenizer *Tokenizer)
             else if (DoStringsMatch(Token.Text, Token.TextLength, "u32") ||
                      DoStringsMatch(Token.Text, Token.TextLength, "r32") ||
                      DoStringsMatch(Token.Text, Token.TextLength, "s32") ||
+                     DoStringsMatch(Token.Text, Token.TextLength, "struct") ||
                      DoStringsMatch(Token.Text, Token.TextLength, "String"))
             {
                 Token.Type = Token_VariableType;
@@ -463,7 +465,7 @@ static expanded_words ExpandOnUnderscore(char *Text, u32 Length) {
     return Result;
 }
 
-static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char *End, token EnumName, expanded_words Words, char *ArrayTypeAsString) {
+static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char *End, token EnumName, expanded_words Words, char *ArrayTypeAsString, file_handle FileHandle) {
     
     char cb[2048];
     char *At = cb;
@@ -496,7 +498,7 @@ static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char 
     //////
     
     sprintf_s(At, sizeof(cb) - (At - cb), End);
-    fwrite(cb, StringLength(cb), 1,Tokenizer->FileHandles[ENUM_STRUCTS]);
+    fwrite(cb, StringLength(cb), 1,Tokenizer->FileHandles[FileHandle]);
     
 }
 
@@ -522,9 +524,40 @@ ParseEnumArray(tokenizer *Tokenizer, token Token) {
         } 
     }
     
-    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "\"%.*s\"%s", "};\n", EnumName, Words, "char *");
+    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "\"%.*s\"%s", "};\n", EnumName, Words, "char *", ENUM_STRUCTS);
     
-    ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0);
+    ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0, ENUM_STRUCTS);
+}
+
+static void 
+ParseStructArray(tokenizer *Tokenizer, token Token) {
+    expanded_words Words = {}; 
+    
+    token StructToken = GetNextToken(Tokenizer);
+    Assert(StructToken.Type == Token_VariableType);
+    
+    token EnumName = GetNextToken(Tokenizer);
+    Assert(EnumName.Type == Token_VariableName);
+    
+    Token = GetNextToken(Tokenizer);
+    Assert(Token.Type == Token_OpenBracket);
+    
+    while(Token.Type != Token_CloseBracket) {
+        Token = GetNextToken(Tokenizer);
+        
+        if(Token.Type == Token_VariableName || Token.Type == Token_VariableType) {
+            string *Word = &Words.Strings[Words.Count++];
+            Word->E = Token.Text;
+            Word->Length = Token.TextLength;
+        } else if(Token.Type == Token_ForwardSlash) {
+            EatComments(Tokenizer, Token);
+        } 
+    }
+    
+    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "\"%.*s\"%s", "};\n", EnumName, Words, "char *", INTROSPECT_STRUCTS);
+    
+    //ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0, INTROSPECT_STRUCTS);
+    
 }
 
 static void
@@ -627,6 +660,8 @@ static void ParseLine(tokenizer *Tokenizer)
                     ParseKeyFunction(Tokenizer, Token);
                 }else if(DoStringsMatch(Token.Text, Token.TextLength, "enum") && !LastTokenDefine) {
                     ParseEnumArray(Tokenizer, Token);
+                } else if(DoStringsMatch(Token.Text, Token.TextLength, "Introspect") && !LastTokenDefine) {
+                    ParseStructArray(Tokenizer, Token);
                 }
                 
                 LastTokenDefine = (DoStringsMatch(Token.Text, Token.TextLength, "define"));
@@ -1189,6 +1224,7 @@ int main(int argc, char* argv[])
     Tokenizer.FileHandles[META_FILE] = OpenFileHandle("calm_meta.h");
     Tokenizer.FileHandles[KEY_FUNCTIONS_FILE] = OpenFileHandle("meta_key_functions.h");
     Tokenizer.FileHandles[ENUM_STRUCTS] = OpenFileHandle("meta_enum_arrays.h");
+    Tokenizer.FileHandles[INTROSPECT_STRUCTS] = OpenFileHandle("meta_introspect_struct_arrays.h");
     
     for(u32 i = 0; i < ArrayCount(FileNames); ++i) {
         void *File = ReadFileWithNullTerminator(FileNames[i]);

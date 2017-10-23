@@ -156,6 +156,8 @@ struct v2i
 #define SLEEP 1
 #endif
 
+#define Introspect 
+
 #include <intrin.h>
 #include "calm_intrinsics.h"
 #include "calm_math.h"

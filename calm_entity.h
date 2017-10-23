@@ -12,6 +12,7 @@ enum entity_type
     Entity_Home,
     Entity_Door,
     Entity_CheckPoint,
+    Entity_CheckPointParent,
     ///////
     Entity_Count,
 };
@@ -33,9 +34,10 @@ struct search_cell {
 struct path_nodes {
     v2 Points[512];
     u32 Count;
+    loaded_sound *Sound;
 };
 
-struct entity {
+Introspect struct entity { 
     u32 ID;  //we no longer identify by pointers _or_ indexes, we search for IDs
     
     v2 Pos;
@@ -65,8 +67,22 @@ struct entity {
     //particle_system ParticleSystem;
     
     // NOTE(OLIVER): this is for the philosophers checkpoints
-    u32 CheckPointParentAt;
-    u32 CheckPointAt;
+    //SAVED
+    //Maybe combine these with the checkpoints used by the check point parents
+    u32 CheckPointParentCount; 
+    u32 CheckPointParentIds[32];
+    //
+    u32 CheckPointParentAt; // Find this via a search
+    u32 CheckPointAt; //For looping through
+    //
+    
+    // NOTE(OLIVER): This is for the check_points 
+    loaded_sound *SoundToPlay;
+    //
+    
+    // NOTE(OLIVER): This is for the check_point parents
+    u32 CheckPointCount;
+    u32 CheckPointIds[16];
     //
     
     // NOTE(OLIVER): This is for the philosopher AI random walk

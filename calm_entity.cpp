@@ -433,6 +433,18 @@ inline void AddChunkTypeToChunkChanger(entity *Entity, chunk_type Type) {
     Entity->ChunkList[Entity->ChunkListCount++] = Type;
 }
 
+inline void AddCheckPointParentIDToEntity(entity *Entity, u32 ChildID) {
+    Assert(Entity->Type == Entity_Philosopher);
+    Assert(Entity->CheckPointParentCount < ArrayCount(Entity->CheckPointParentIds));
+    Entity->CheckPointParentIds[Entity->CheckPointParentCount++] = ChildID;
+}
+
+inline void AddCheckPointIDToCheckPointParent(entity *Entity, u32 ChildID) {
+    Assert(Entity->Type == Entity_CheckPointParent);
+    Assert(Entity->CheckPointCount < ArrayCount(Entity->CheckPointIds));
+    Entity->CheckPointIds[Entity->CheckPointCount++] = ChildID;
+}
+
 inline void EndPath(entity *Entity) {
     if(Entity->Path.Count > 0) {
         //Assert(Entity->Path.Count > Entity->VectorIndexAt);
@@ -441,7 +453,7 @@ inline void EndPath(entity *Entity) {
 }
 
 inline entity *
-InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID) {
+InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, animation *Animation = 0) {
     Assert(GameState->EntityCount < ArrayCount(GameState->Entities));
     
     u32 EntityIndex = GameState->EntityCount++;
@@ -452,7 +464,7 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID) {
     *Entity = {};
     Entity->ID = ID;
     Entity->Velocity = {};
-    Entity->MovePeriod = 0.3f;
+    Entity->MovePeriod = 0.25f;
     Entity->Pos = Pos;
     //Entity->StartPos = Entity->TargetPos;
     Entity->Dim = Dim;
@@ -469,6 +481,19 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID) {
     Entity->AnimationListSentintel = {}; 
     Entity->AnimationListSentintel.Next = Entity->AnimationListSentintel.Prev = &Entity->AnimationListSentintel; 
     
+    switch(Type) {
+        case (Entity_Player): {
+            
+            AddAnimationToList(GameState, &GameState->MemoryArena, Entity, FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, "Knight_Idle"));
+        } break;
+        case (Entity_Philosopher): {
+            AddAnimationToList(GameState, &GameState->MemoryArena, Entity, FindAnimation(GameState->ManAnimations, GameState->ManAnimationCount, "Man_Idle"));
+        } break;
+        default: {
+            //No animation for entity
+        }
+        
+    }
     //Entity->LastMoves;
     Entity->LastMoveAt = 0;
     Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion

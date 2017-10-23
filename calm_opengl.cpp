@@ -203,8 +203,8 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
             glLoadIdentity();
             glMatrixMode(GL_PROJECTION); 
             
-            r32 a = Group->Transform.Rotation.X*SafeRatio1(2.0f, (r32)Width); 
-            r32 b = Group->Transform.Rotation.Y*SafeRatio1(2.0f, (r32)Height);
+            r32 a = SafeRatio1(2.0f, (r32)Width); 
+            r32 b = SafeRatio1(2.0f, (r32)Height);
             r32 ProjMat[] = {
                 a,  0,  0,  0,
                 0,  b,  0,  0,

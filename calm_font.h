@@ -236,7 +236,7 @@ inline void AdvanceCursor(font *Font, char LastCodePoint, char CheesePoint, r32 
     if(*XCursor > *XCursorMax) {
         *XCursorMax = *XCursor;
     }
-    if(*YCursor < *YCursorMax) {
+    if(*YCursor > *YCursorMax) {
         *YCursorMax = *YCursor;
     }
     
@@ -257,7 +257,7 @@ struct draw_text_options {
 inline draw_text_options InitDrawOptions() {
     draw_text_options Result = {};
     Result.DisplayText = true; 
-    Result.LineAdvanceModifier = -1;
+    Result.LineAdvanceModifier = 1;
     Result.OptionalLetterCount = INT_MAX;
     Result.NewLineSensitive = true;
     Result.ZDepth = 0.0f;

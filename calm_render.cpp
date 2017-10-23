@@ -524,8 +524,9 @@ inline v2 Scale(transform *Transform, v2 Pos) {
 }
 
 inline v2 Transform(transform *Transform, v2 Pos) {
-    v2 Result = Hadamard(Transform->Scale, Pos);
-    Result += Transform->Offset;
+    v2 Result = Hadamard(Transform->Scale, Pos); // SCALE
+    Result = Mat2MultiplyV2(Result, Transform->Rotation);
+    Result += Transform->Offset; //TRANSLATE
     return Result;
 }
 
@@ -537,6 +538,7 @@ inline rect2 Transform(transform *TransformPtr, rect2 Dim) {
 inline v2 InverseTransform(transform *Transform, v2 Pos) {
     
     v2 Result = Pos - Transform->Offset;
+    Result = Mat2MultiplyV2(Result, Transpose(Transform->Rotation));
     Result = Hadamard(Result, V2(1.0f / Transform->Scale.X, 1.0f / Transform->Scale.Y));
     
     return Result;
@@ -644,7 +646,7 @@ void PushRectCenter(render_group *Group, rect2 Dim, r32 ZDepth, v4 Color) {
 }
 
 
-internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, v2 Rotation, thread_info *ThreadInfo, game_state *State, game_memory *Memory) {
+internal void InitRenderGroup(render_group *Group, bitmap *Buffer,memory_arena *MemoryArena, memory_size MemorySize, v2 Scale, v2 Offset, mat2 Rotation, thread_info *ThreadInfo, game_state *State, game_memory *Memory) {
     *Group = {};
     Group->ScreenDim = V2i(Buffer->Width, Buffer->Height);
     Group->Buffer = Buffer;

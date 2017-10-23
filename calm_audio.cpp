@@ -502,7 +502,12 @@ MixPlayingSounds(game_output_sound_buffer *SoundBuffer, audio_state *AudioState,
     
 }
 
-
+//Can use this to add a sound to that was already playing
+inline void PlaySound(audio_state *AudioState, playing_sound *PlayingSound) {
+    PlayingSound->NextSound = AudioState->FirstPlayingSound;
+    AudioState->FirstPlayingSound = PlayingSound;
+    
+}
 
 internal playing_sound *
 PlaySound(audio_state *AudioState, loaded_sound *Sound)
@@ -523,15 +528,57 @@ PlaySound(audio_state *AudioState, loaded_sound *Sound)
     PlayingSound->TargetVolumes = V2(1, 1);
     PlayingSound->dCurrentVolumes = V2(0, 0);
     PlayingSound->dSample = 1.0f;
+    PlayingSound->Loop = false;
     
-    PlayingSound->NextSound = AudioState->FirstPlayingSound;
-    
-    AudioState->FirstPlayingSound = PlayingSound;
+    PlaySound(AudioState, PlayingSound);
     
     return PlayingSound;
 }
 
+//These are for the below stop and pause sound methods
+enum sound_action {
+    SOUND_STOP, 
+    SOUND_PAUSE,
+};
+//
 
+inline void SearchSound(audio_state *AudioState, playing_sound *Sound, sound_action Action) {
+    
+    for(playing_sound **PlayingSoundPtr = &AudioState->FirstPlayingSound; *PlayingSoundPtr; 
+        ) {
+        playing_sound *PlayingSound = *PlayingSoundPtr;
+        
+        if(PlayingSound == Sound) {
+            switch(Action) {
+                case SOUND_PAUSE: {
+                    playing_sound *Next = PlayingSound->NextSound;
+                    *PlayingSoundPtr = Next;
+                } break;
+                case SOUND_STOP: {
+                    playing_sound *Next = PlayingSound->NextSound;
+                    
+                    PlayingSound->NextSound = AudioState->FreePlayingSound;
+                    AudioState->FreePlayingSound = PlayingSound;
+                    
+                    *PlayingSoundPtr = Next;
+                } break;
+            }
+            
+            break;
+        }
+        PlayingSoundPtr = &PlayingSound->NextSound;
+    }
+    
+}
+
+//This assumes to keep the sound and are in charge of freeing the memory when finished with. Either allowing the sound to end or useing the stop sound method
+inline void PauseSound(audio_state *AudioState, playing_sound *Sound) {
+    SearchSound(AudioState, Sound, SOUND_PAUSE);
+}
+
+inline void StopSound(audio_state *AudioState, playing_sound *Sound) {
+    SearchSound(AudioState, Sound, SOUND_STOP);
+}
 
 internal void
 ChangeSoundVolume(playing_sound *PlayingSound, v2 EndVolume, real32 RampInSecs)

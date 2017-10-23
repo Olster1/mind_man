@@ -52,34 +52,18 @@ struct mat2
     union
     {
         r32 E[2][2];
-        struct
-        
-        {
+        struct {
             r32 X1, Y1, X2, Y2;
+        }; 
+        struct {
+            v2 A;
+            v2 B;
         };
     };
 };
 
 #define Sqr(Value) ((r32)(Value)*(r32)(Value))
 #define Square(Value) Sqr(Value)
-
-inline mat2
-IdentityMatrix2()
-{
-    mat2 Result;
-    
-    Result.E[0][0] = 1; Result.E[0][1] = 0;
-    Result.E[1][0] = 0; Result.E[1][1] = 1;
-    
-    return Result;
-}
-
-inline mat2
-Mat2()
-{
-    mat2 Result = IdentityMatrix2();
-    return Result;
-}
 
 inline v2
 V2(r32 X, r32 Y)
@@ -223,7 +207,12 @@ Lerp(r32 A, r32 t, r32 B)
     return Result;
 }
 
-
+inline r32
+InverseLerp(r32 A, r32 M, r32 B)
+{
+    r32 Result = (M - A) / (B - A);
+    return Result;
+}
 
 inline r32 SineousLerp0To1(r32 A, r32 t, r32 B) {
     r32 TransformedT = (r32)sin(t*PI32/2);
@@ -941,6 +930,26 @@ InBounds(rect2 Rect, v2 Point)
     return Result;
 }
 
+inline v2 
+Clamp(v2 Point, rect2 Bounds) {
+    if(Point.X >= Bounds.Max.X) { Point.X = Bounds.Max.X - 1; }
+    if(Point.X < Bounds.Min.X) { Point.X = Bounds.Min.X; }
+    if(Point.Y >= Bounds.Max.Y) { Point.Y = Bounds.Max.Y - 1; }
+    if(Point.Y < Bounds.Min.Y) { Point.Y = Bounds.Min.Y; }
+    
+    return Point;
+}
+
+inline rect2 
+Subtract(rect2 A, rect2 B) {
+    rect2 Result = {};
+    
+    Result.Min = A.Min - B.Min;
+    Result.Max = A.Max - B.Max;
+    
+    return Result;
+}
+
 inline r32 GetWidth(rect2 Rect) 
 {
     r32 Result = Rect.MaxX - Rect.MinX;
@@ -1006,8 +1015,8 @@ inline rect2 ClipLeftX(v2 Min, rect2 Rect) {
     
     rect2 Result = Rect;
     
-    if(Rect.Min.X < Min.X) {
-        Rect.Min.X = Min.X;
+    if(Result.Min.X < Min.X) {
+        Result.Min.X = Min.X;
     }
     
     return Result;
@@ -1022,6 +1031,60 @@ operator ==(rect2 A, rect2 B)
                   A.Min.X == B.Min.X &&
                   A.Max.Y == B.Max.Y);
     
+    return Result;
+}
+
+
+inline mat2
+IdentityMatrix2()
+{
+    mat2 Result;
+    
+    Result.E[0][0] = 1; Result.E[0][1] = 0;
+    Result.E[1][0] = 0; Result.E[1][1] = 1;
+    
+    return Result;
+}
+
+//MATRIX 2 operation
+inline mat2
+RotateRad(mat2 Mat, r32 Radians)
+{
+    mat2 Result;
+    
+    v2 A = V2(Cos(Radians), Sin(Radians));
+    v2 B = Perp(A);
+    
+    Result.E[0][0] = Inner(A, Mat.A); Result.E[0][1] = Inner(B, Mat.A);
+    Result.E[1][0] = Inner(A, Mat.B); Result.E[1][1] = Inner(B, Mat.B);
+    
+    return Result;
+}
+
+inline mat2 
+Transpose(mat2 A) {
+    mat2 Result = {};
+    
+    Result.E[0][0] = A.E[0][0]; Result.E[0][1] = A.E[1][0];
+    Result.E[1][0] = A.E[0][1]; Result.E[1][1] = A.E[1][1];
+    
+    return Result;
+}
+
+inline v2 
+Mat2MultiplyV2(v2 A, mat2 Mat) {
+    v2 Result = {};
+    
+    Result.X = A.X*Mat.A.X + A.Y*Mat.A.Y;
+    Result.Y = A.X*Mat.B.X + A.Y*Mat.B.Y;
+    
+    return Result;
+}
+
+inline mat2
+Mat2()
+{
+    mat2 Result = IdentityMatrix2();
     return Result;
 }
 

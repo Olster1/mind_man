@@ -1,15 +1,15 @@
 static char *entity_type_Names[] = {
-"Entity_Null", "Entity_Block", "Entity_Guru", "Entity_Philosopher", "Entity_Player", "Entity_Chunk_Changer", "Entity_Camera", "Entity_Dropper", "Entity_Home", "Entity_Door", "Entity_CheckPoint", "Entity_Count", "entity_type"};
+"Entity_Null", "Entity_Block", "Entity_Guru", "Entity_Philosopher", "Entity_Player", "Entity_Chunk_Changer", "Entity_Camera", "Entity_Dropper", "Entity_Home", "Entity_Door", "Entity_CheckPoint", "Entity_CheckPointParent", "Entity_Count", "entity_type"};
 static entity_type entity_type_Values[] = {
-Entity_Null, Entity_Block, Entity_Guru, Entity_Philosopher, Entity_Player, Entity_Chunk_Changer, Entity_Camera, Entity_Dropper, Entity_Home, Entity_Door, Entity_CheckPoint, Entity_Count};
+Entity_Null, Entity_Block, Entity_Guru, Entity_Philosopher, Entity_Player, Entity_Chunk_Changer, Entity_Camera, Entity_Dropper, Entity_Home, Entity_Door, Entity_CheckPoint, Entity_CheckPointParent, Entity_Count};
 static char *search_type_Names[] = {
 "SEARCH_VALID_SQUARES", "SEARCH_INVALID_SQUARES", "SEARCH_FOR_TYPE", "search_type"};
 static search_type search_type_Values[] = {
 SEARCH_VALID_SQUARES, SEARCH_INVALID_SQUARES, SEARCH_FOR_TYPE};
 static char *element_ui_type_Names[] = {
-"UI_Parent", "UI_Moveable", "UI_DropDownBoxParent", "UI_DropDownBox", "UI_Slider_Vertical", "UI_CheckBox", "UI_Button", "UI_Entity", "element_ui_type"};
+"UI_Parent", "UI_Moveable", "UI_DropDownBoxParent", "UI_DropDownBox", "UI_Slider", "UI_CheckBox", "UI_Button", "UI_Entity", "element_ui_type"};
 static element_ui_type element_ui_type_Values[] = {
-UI_Parent, UI_Moveable, UI_DropDownBoxParent, UI_DropDownBox, UI_Slider_Vertical, UI_CheckBox, UI_Button, UI_Entity};
+UI_Parent, UI_Moveable, UI_DropDownBoxParent, UI_DropDownBox, UI_Slider, UI_CheckBox, UI_Button, UI_Entity};
 static char *chunk_type_Names[] = {
 "ChunkNull", "ChunkLight", "ChunkDark", "ChunkBlock", "ChunkDoor", "ChunkMain", "ChunkTypeCount", "chunk_type"};
 static chunk_type chunk_type_Values[] = {

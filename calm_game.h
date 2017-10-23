@@ -137,15 +137,6 @@ struct tile_type_layout {
     s32 E[3][3];
 };
 
-struct check_point {
-    b32 IsMusic;
-    v2i Pos;
-};
-
-struct check_point_parent {
-    u32 Count;
-    check_point CheckPoints[16];
-};
 
 #define WORLD_CHUNK_HASH_SIZE 4096
 
@@ -172,8 +163,13 @@ struct game_state
     
     u32 TextureHandleIndex;
     
+    loaded_sound MenuBackgroundMusic;
     loaded_sound BackgroundMusic;
+    loaded_sound PushSound[4];
     loaded_sound FootstepsSound[32];
+    
+    playing_sound *BackgroundSoundInstance;
+    playing_sound *MenuModeSoundInstance;
     
     world_chunk *ChunkFreeList;
     
@@ -186,7 +182,7 @@ struct game_state
     
     game_mode GameMode;
     
-    u32 EntityIDAt;
+    u32 EntityIDAt; // 0 index is a null ID
     u32 EntityCount;
     entity Entities[64];
     
@@ -236,8 +232,8 @@ struct game_state
     u32 KnightAnimationCount;
     animation KnightAnimations[16];
     
-    u32 CheckPointCount;
-    check_point_parent CheckPointParents[256];
+    u32 ManAnimationCount;
+    animation ManAnimations[16];
     
     random_series GeneralEntropy;
     
