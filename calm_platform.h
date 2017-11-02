@@ -166,6 +166,8 @@ struct v2i
 #define CastAs(type, value) (*((type *)&value))
 #define CastVoidAs(type, value) (*((type *)value))
 
+#define WORLD_CHUNK_HASH_SIZE 4096
+
 inline b32 IsWhiteSpace(char Char) {
     b32 Result = (Char == ' ' || Char == '\n' || Char == '\r');
     return Result;

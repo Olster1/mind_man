@@ -11,7 +11,7 @@
 #include "calm_render.cpp"
 #include "calm_menu.cpp"
 #include "calm_console.cpp"
-#include "calm_ui.cpp"
+#include "calm_ui.h"
 #include "calm_animation.cpp"
 #include "calm_entity.cpp"
 #include "calm_meta.h"
@@ -1077,6 +1077,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->UIState = PushStruct(&GameState->MemoryArena, ui_state);
         
+        GameState->UIState->TempArena = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
+        
         /////////////////////////////////
         
         GameState->RenderConsole = true;
@@ -1121,8 +1123,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->DarkTiles[BOTTOM_CENTER_TILE] = LoadBitmap(Memory, 0, "static_bottom.bmp");
         GameState->DarkTiles[BOTTOM_RIGHT_TILE] = LoadBitmap(Memory, 0, "static_right.bmp");
         
-        //GameState->Crate = LoadImage(Memory, 0, "crate.bmp ");
-        GameState->Crate = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.3f));
+        GameState->Crate = LoadImage(Memory, &GameState->MemoryArena, "crate.bmp ", V2(0.5f, 0.3f));
+        //GameState->Crate = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.3f));
         GameState->Water = LoadBitmap(Memory, 0, "water3.bmp");
         GameState->Desert = LoadBitmap(Memory, 0, "desert.bmp");
         
@@ -1130,7 +1132,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->Monster = LoadBitmap(Memory, 0, "monster1.bmp");
         
-        GameState->BackgroundImage = LoadImage(Memory, &GameState->MemoryArena, "background_sun.png", V2(0.5f, 0.5f));
+        //background_sun
+        GameState->BackgroundImage = LoadImage(Memory, &GameState->MemoryArena, "sky_background.png", V2(0.5f, 0.5f));
         
         
         GameState->KnightAnimationCount = 0;
@@ -1514,6 +1517,31 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     ClearBuffer(&DebugConsole.Input);
                 }
                 
+            } else if (GameState->UIState->InteractingWith->Type == UI_TextBox) {
+                
+                ui_state *UIState = GameState->UIState;
+                EmptyMemoryArena(&UIState->TempArena);
+                
+                ui_element *Elm = UIState->InteractingWith;
+                
+                char_buffer *ElmBuffer = &Elm->Set.Buffer;
+                for(u32 KeyIndex = 0; KeyIndex <= Memory->SizeOfGameKeys; ++KeyIndex) {
+                    
+                    game_button *Button = Memory->GameKeys + KeyIndex;
+                    
+                    if(Button->IsDown) {
+                        //DebugConsole.InputTimer.Value = 0;
+                        switch(KeyIndex) {
+                            case 8: { //Backspace
+                                Splice_("", ElmBuffer, -1);
+                            } break;
+                            default: {
+                                AddToInBuffer("%s", &KeyIndex);
+                            }
+                        }
+                    }
+                }
+                
             } else {
                 
                 v2i PlayerGridP = {};
@@ -1785,19 +1813,14 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 }
                                 /////// NOTE(OLIVER): Player Animation
                                 if(!IsEmpty(&Entity->AnimationListSentintel)) {
-                                    bitmap *CurrentBitmap = GetBitmap(Entity->AnimationListSentintel.Next);
                                     
-                                    PushBitmap(RenderGroup, V3(EntityRelP, 1), CurrentBitmap,  1.7f*WorldChunkInMeters, BufferRect);
+                                    PushCurrentAnimationBitmap(RenderGroup, Entity, EntityRelP, BufferRect, 1.7f);
                                     
                                     //// NOTE(OLIVER): Preparing to look for new animation State
                                     
                                     animation *NewAnimation = 0;
-                                    r32 DirectionValue = 0;
-                                    if(Entity->Velocity.X != 0 || Entity->Velocity.Y != 0) {
-                                        v2 EntityVelocity = Normal(Entity->Velocity);
-                                        DirectionValue = ATan2_0toTau(EntityVelocity.Y, EntityVelocity.X);
-                                        //AddToOutBuffer("%f\n\n", DirectionValue);
-                                    }
+                                    r32 DirectionValue = GetDirectionInRadians(Entity);
+                                    
 #define USE_ANIMATION_STATES 0
 #if USE_ANIMATION_STATES
                                     r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
@@ -1896,9 +1919,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 } 
                                 //Then if we couldn't find the player we just move a random direction
                                 if(!WasSuccessful && !HasMovesLeft(Entity)) {
-                                    if(Entity->CheckPointParentAt) {
-                                        u32 CheckPointParentID = Entity->CheckPointParentIds[Entity->CheckPointParentAt];
-                                        entity *CheckPointParent= FindEntityFromID(GameState, CheckPointParentID);
+                                    v2i GridPos = GetGridLocation(Entity->Pos);
+                                    
+                                    world_chunk *CheckPointParentIdInfo =  GetOrCreateWorldChunk(Entity->ParentCheckPointIds, GridPos.X, GridPos.Y, 0, ChunkNull, &GameState->ChunkFreeList);
+                                    
+                                    if(CheckPointParentIdInfo) {
+                                        u32 ParentID = (u32)CheckPointParentIdInfo->Type;
+                                        Assert(ParentID);
+                                        
+                                        entity *CheckPointParent= FindEntityFromID(GameState, ParentID);
                                         if(CheckPointParent && CheckPointParent->CheckPointCount) { //Parent has CheckPoints
                                             entity *CurrentCheckPoint = FindEntityFromID(GameState, CheckPointParent->CheckPointIds[Entity->CheckPointAt]);
                                             
@@ -1962,19 +1991,13 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 0, 1));
 #else 
                             if(!IsEmpty(&Entity->AnimationListSentintel)) {
-                                bitmap *CurrentBitmap = GetBitmap(Entity->AnimationListSentintel.Next);
                                 
-                                PushBitmap(RenderGroup, V3(EntityRelP, 1), CurrentBitmap,  3.0f*WorldChunkInMeters, BufferRect);
-                                
+                                PushCurrentAnimationBitmap(RenderGroup, Entity, EntityRelP, BufferRect, 3.0f);
                                 //// NOTE(OLIVER): Preparing to look for new animation State
                                 
                                 animation *NewAnimation = 0;
-                                r32 DirectionValue = 0;
-                                if(Entity->Velocity.X != 0 || Entity->Velocity.Y != 0) {
-                                    v2 EntityVelocity = Normal(Entity->Velocity);
-                                    DirectionValue = ATan2_0toTau(EntityVelocity.Y, EntityVelocity.X);
-                                    //AddToOutBuffer("%f\n\n", DirectionValue);
-                                }
+                                r32 DirectionValue = GetDirectionInRadians(Entity);
+                                
 #define USE_ANIMATION_STATES 0
 #if USE_ANIMATION_STATES
                                 r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
@@ -2104,132 +2127,119 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             
             //////////////UI Update And Rendering////////////////
             if(GameState->ShowHUD) {
+                ui_state *UIState = GameState->UIState;
                 
-#define PushOntoLastElms(LastElms, LastElmCount, ChildElm)  Assert(LastElmCount < ArrayCount(LastElms)); ParentElm = LastElms[LastElmCount++] = ChildElm;
-                
-                u32 ArrayCount = 0; 
-                u32 IndexesProcessed[ArrayCount(GameState->UIState->Elements)] = {};
-                v2 PosAt = {};
+                ui_loop_info UIInfo = InitUILoopInfo();
                 ui_element *NextHotEntity = 0;
-                r32 IndentSpace = 20;
-                u32 LastElmCount = 0;
-                ui_element *LastElms[64] = {};
-                r32 MenuWidth = 300;
-                v2 StartP = {};
                 
                 for(u32 UIIndex = 0; UIIndex < GameState->UIState->ElmCount; ++UIIndex) {
                     ui_element *Element = GameState->UIState->Elements + UIIndex;
                     
                     //loop through all ui elements
-                    if(!IndexesProcessed[UIIndex] && Element->IsValid) { //Check if it has been drawn
-                        Assert(LastElmCount == 0);
-                        StartP = PosAt = Element->Set.Pos;
+                    if(!UIInfo.IndexesProcessed[UIIndex] && Element->IsValid) { //Check if it has been drawn
+                        Assert(UIInfo.LastElmCount == 0);
+                        UIInfo.StartP = UIInfo.PosAt = Element->Set.Pos;
                         
-                        rect2 ClipRect = Rect2MinDim(StartP, V2(MenuWidth, StartP.Y + MAX_S32));
+                        rect2 ClipRect = Rect2MinDim(UIInfo.StartP, V2(UIInfo.MenuWidth, UIInfo.StartP.Y + MAX_S32));
                         b32 DrawBacking = true;
                         
-                        ui_element *ParentElm = 0;
-                        
-                        PushOntoLastElms(LastElms, LastElmCount, Element);
+                        PushOntoLastElms(&UIInfo, Element);
                         
                         for(;;) {
-                            Assert(LastElmCount > 0);
-                            ParentElm = LastElms[LastElmCount - 1];
+                            GetLatestElm(&UIInfo);
                             
-                            for(u32 ChildAt = ParentElm->TempChildrenCount; 
-                                ChildAt <  ParentElm->ChildrenCount; 
+                            for(UIInfo.ChildAt = UIInfo.ParentElm->TempChildrenCount;
+                                UIInfo.ChildAt <  UIInfo.ParentElm->ChildrenCount; 
                                 ) {
-                                b32 AdvanceChildIndex = true;
-                                u32 ChildIndex = ParentElm->ChildrenIndexes[ChildAt];
                                 
-                                IndexesProcessed[ChildIndex] = true;
+                                BeginUIElmsLoop(&UIInfo, GameState->UIState, UI_CHILD_LOOP);
                                 
-                                ui_element *ChildElm = &GameState->UIState->Elements[ChildIndex];
-                                
-                                Assert(ChildElm->IsValid);
-                                
+                                ////////Drawing the ui Element//////
                                 r32 MenuHeight = 300;
                                 v2 TempPosAt = {};
                                 
                                 rect2 ElementAsRect = {};
-                                switch(ChildElm->Type) {
+                                switch(UIInfo.ChildElm->Type) {
                                     case UI_Moveable:{
-                                        v2 Dim = V2(MenuWidth, (r32)GameState->DebugFont->LineAdvance);
-                                        ElementAsRect = Rect2MinDim(V2(PosAt.X, PosAt.Y), Dim);
+                                        v2 Dim = V2(UIInfo.MenuWidth, (r32)GameState->DebugFont->LineAdvance);
+                                        ElementAsRect = Rect2MinDim(V2(UIInfo.PosAt.X, UIInfo.PosAt.Y), Dim);
                                         PushRectOutline(OrthoRenderGroup, ElementAsRect, 1, V4(0.5f, 1, 0, 1)); 
-                                        PosAt.Y += GetHeight(ElementAsRect);
-                                        ChildElm->Set.Dim = Dim;
+                                        UIInfo.PosAt.Y += GetHeight(ElementAsRect);
+                                        UIInfo.ChildElm->Set.Dim = Dim;
                                     } break;
                                     case UI_DropDownBoxParent: {
-                                        if(ChildElm->Set.Active) {
-                                            if(ChildElm->ChildrenCount) {
+                                        if(UIInfo.ChildElm->Set.Active) {
+                                            if(UIInfo.ChildElm->ChildrenCount) {
                                                 
-                                                DrawMenuItemWithText(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
+                                                DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
                                                 
                                             }
                                         } 
                                     } break;
                                     case UI_DropDownBox: {
-                                        Assert(ParentElm->Type == UI_DropDownBoxParent);
-                                        if(!ParentElm->Set.Active) { //This is the parent
-                                            rect2 MenuClipRect = ClipLeftX(PosAt, ClipRect);
+                                        Assert(UIInfo.ParentElm->Type == UI_DropDownBoxParent);
+                                        if(!UIInfo.ParentElm->Set.Active) { //This is the parent
+                                            rect2 MenuClipRect = ClipLeftX(UIInfo.PosAt, ClipRect);
                                             MenuClipRect.Max.Y = (ClipRect.Min.Y + MenuHeight);
                                             
                                             //This needs the stencil buffer to clip the rect space. 
                                             b32 DrawMenuItem = true;
                                             b32 DisplayMenuItem = true;
-                                            if(PosAt.Y < TempPosAt.Y) {
+                                            if(UIInfo.PosAt.Y < TempPosAt.Y) {
                                                 DisplayMenuItem = false;
                                             }
-                                            if(PosAt.Y > MenuClipRect.Max.Y) {
+                                            if(UIInfo.PosAt.Y > MenuClipRect.Max.Y) {
                                                 DrawMenuItem = false;
                                             }
                                             //
                                             if(DrawMenuItem) {
-                                                DrawMenuItemWithText(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, MenuClipRect, DisplayMenuItem);
+                                                DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, MenuClipRect, UIState->InteractingWith,  DisplayMenuItem);
                                             }
                                         } 
                                         
                                     } break;
                                     case UI_CheckBox: {
-                                        DrawMenuItemWithText(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
+                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
+                                    } break;
+                                    case UI_TextBox: {
+                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
                                     } break;
                                     case UI_Slider: {
-                                        if(!ParentElm->Set.Active) {
-                                            rect2 OutlineDim = Rect2MinDim(PosAt - V2(IndentSpace, 0), V2(IndentSpace, MenuHeight));
+                                        if(!UIInfo.ParentElm->Set.Active) {
+                                            rect2 OutlineDim = Rect2MinDim(UIInfo.PosAt - V2(UIInfo.IndentSpace, 0), V2(UIInfo.IndentSpace, MenuHeight));
                                             PushRectOutline(OrthoRenderGroup, OutlineDim, 1, V4(0, 0, 0, 1));
                                             v2 ScrollPos = {};
-                                            r32 ScrollAt01 = *((r32 *)ChildElm->Set.ValueLinkedToPtr);
+                                            r32 ScrollAt01 = *((r32 *)UIInfo.ChildElm->Set.ValueLinkedToPtr);
                                             ScrollPos.Y = ScrollAt01;
-                                            ScrollPos.Y = Lerp(ChildElm->Set.Min, ScrollPos.Y, ChildElm->Set.Max);
-                                            ScrollPos.X = PosAt.X - IndentSpace;
+                                            ScrollPos.Y = Lerp(UIInfo.ChildElm->Set.Min, ScrollPos.Y, UIInfo.ChildElm->Set.Max);
+                                            ScrollPos.X = UIInfo.PosAt.X - UIInfo.IndentSpace;
                                             
-                                            rect2 HandleDim = Rect2CenterDim(ScrollPos, V2(IndentSpace, IndentSpace));
-                                            HandleDim.Min.X += 0.5f*IndentSpace;
-                                            HandleDim.Max.X += 0.5f*IndentSpace;
+                                            rect2 HandleDim = Rect2CenterDim(ScrollPos, V2(UIInfo.IndentSpace, UIInfo.IndentSpace));
+                                            HandleDim.Min.X += 0.5f*UIInfo.IndentSpace;
+                                            HandleDim.Max.X += 0.5f*UIInfo.IndentSpace;
                                             v4 Color = V4(1, 1, 1, 1);
                                             PushRect(OrthoRenderGroup, HandleDim, 1, Color);
                                             ElementAsRect = HandleDim;
-                                            ChildElm->Set.Min = OutlineDim.Min.Y;
-                                            ChildElm->Set.Max = OutlineDim.Max.Y;
+                                            UIInfo.ChildElm->Set.Min = OutlineDim.Min.Y;
+                                            UIInfo.ChildElm->Set.Max = OutlineDim.Max.Y;
                                             
-                                            TempPosAt = PosAt;
-                                            PosAt.Y -= MenuHeight*ScrollAt01;
+                                            TempPosAt = UIInfo.PosAt;
+                                            UIInfo.PosAt.Y -= MenuHeight*ScrollAt01;
                                         }
                                         
                                     } break;
                                     case UI_Button: {
-                                        DrawMenuItemWithText(ChildElm, OrthoRenderGroup, &PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(PosAt, ClipRect));
+                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
                                     } break;
                                     case UI_Entity: {
                                         //Already Rendered Above
-                                        u32 ID = CastVoidAs(u32, ChildElm->Set.ValueLinkedToPtr);
+                                        u32 ID = CastVoidAs(u32, UIInfo.ChildElm->Set.ValueLinkedToPtr);
                                         entity *Entity = FindEntityFromID(GameState, ID);
                                         v2 EntityRelP = Entity->Pos - CamPos;
                                         
                                         ElementAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
                                         if(InBounds(ElementAsRect, MouseP_PerspectiveSpace)) {
-                                            NextHotEntity = ChildElm;
+                                            NextHotEntity = UIInfo.ChildElm;
                                             //AddToOutBuffer("Is Hot!\n");
                                         }
                                         DrawBacking = false;
@@ -2237,39 +2247,26 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                     } break;
                                 }
                                 
-                                ChildElm->Set.Pos = ElementAsRect.Min;
-                                ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
+                                
+                                UIInfo.ChildElm->Set.Pos = ElementAsRect.Min;
+                                UIInfo.ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
                                 
                                 if(InBounds(ElementAsRect, MouseP_OrthoSpace)) {
-                                    NextHotEntity = ChildElm;
+                                    NextHotEntity = UIInfo.ChildElm;
                                 }
+                                ///////Finished Drawing UI ELEMENT ///////
+                                EndUIElmsLoop(&UIInfo, UI_CHILD_LOOP);
                                 
-                                if(ChildElm->ChildrenCount) {
-                                    PosAt.X += IndentSpace;
-                                    ParentElm->TempChildrenCount = ChildAt + 1;
-                                    PushOntoLastElms(LastElms, LastElmCount, ChildElm);
-                                    AdvanceChildIndex = false;
-                                } 
-                                if(AdvanceChildIndex) {
-                                    ++ChildAt;
-                                }
                             }
-                            ParentElm->TempChildrenCount = 0;
-                            
-                            if(LastElmCount > 1) {
-                                PosAt.X -= IndentSpace;
-                                LastElmCount--;
-                            } else {
-                                LastElmCount--;
-                                // NOTE(Oliver): Finshed rendering whole ui structure
-                                break; 
+                            if(EndUIElmsLoop(&UIInfo, UI_OUTER_LOOP)) {
+                                break;
                             }
                         }
                         
                         if(DrawBacking) {
                             rect2 BackingRect = ClipRect;
-                            BackingRect.Max.Y = PosAt.Y;
-                            PushRect(OrthoRenderGroup, BackingRect, 1, V4(0.2f, 0.2f, 0.2f, 0.5f));
+                            BackingRect.Max.Y = UIInfo.PosAt.Y;
+                            //PushRect(OrthoRenderGroup, BackingRect, 1, V4(0.2f, 0.2f, 0.2f, 0.5f));
                         }
                         
                     }
@@ -2280,7 +2277,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                 //AddToOutBuffer("{%f, %f}", MouseP_OrthoSpace.X, MouseP_OrthoSpace.Y);
                 
                 ///////////////
-                ui_state *UIState = GameState->UIState;
+                
                 if(WasPressed(Memory->GameButtons[Button_LeftMouse])) {
                     //Add Block
                     if(IsDown(Memory->GameButtons[Button_Shift])) {
@@ -2353,7 +2350,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                                 u32 Index = ++Phil->CheckPointParentCount;
                                                 Phil->CheckPointParentIds[Index] = Entity->ID;
                                                 
-                                                Phil->CheckPointParentAt = Index;
+                                                //Phil->CheckPointParentAt = Index;
                                                 //
                                                 
                                             } else {
@@ -2391,6 +2388,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 InitializeMove(GameState, Player, TargetP_r32);
 #endif
                             } else {
+                                
                                 //NOTE: This is interactable objects;
                                 Assert(NextHotEntity->IsValid);
                                 UIState->HotEntity = NextHotEntity;
@@ -2408,6 +2406,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     //MOUSE BUTTON RELEASED ACTIONS
                     if(UIState->InteractingWith) {
                         ui_element *InteractEnt = UIState->InteractingWith;
+                        b32 ClearInteratingWith = true;
+                        
                         switch(InteractEnt->Type) {
                             case UI_DropDownBox: {
                                 ui_element *Parent = InteractEnt->Parent;
@@ -2446,6 +2446,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 b32 Value = *((b32 *)InteractEnt->Set.ValueLinkedToPtr);
                                 *(b32 *)InteractEnt->Set.ValueLinkedToPtr = !Value;
                             } break;
+                            case UI_TextBox: {
+                                ClearInteratingWith = false; 
+                            } break;
                             case UI_DropDownBoxParent: {
                                 InteractEnt->Set.Active = !InteractEnt->Set.Active;
                             } break;
@@ -2454,7 +2457,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             }
                         }
                         
-                        UIState->InteractingWith = 0;
+                        if(ClearInteratingWith) {
+                            UIState->InteractingWith = 0;
+                        }
                     }
                 }
                 
@@ -2477,23 +2482,50 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", entity_type_Names[Entity->Type]);
                             }
                             
-#define INTROSPECT_ENTITIES 0
+#define INTROSPECT_ENTITIES 1
 #if INTROSPECT_ENTITIES
+                            
+                            
+                            if(UIState->TempUIStack) {
+                                RemoveUIElmAndChildren(UIState,UIState->TempUIStack);
+                                UIState->TempUIStack = 0;
+                            }
+                            
                             if(!UIState->TempUIStack) {
                                 ui_element_settings UISet = {};
                                 UISet.Pos = V2(300, 20);
-                                u32 ElmIndex = PushUIElement(GameState->UIState, UI_Moveable,  UISet);
+                                u32 ParentElmIndex = PushUIElement(GameState->UIState, UI_Moveable,  UISet);
                                 {
-                                    for(u32 i = 0; i < ArrayCount(entity_Names) - 1; i += 2) {
-                                        char *Text = PushArray(&GameState->StringArena, char, 256);
-                                        PrintS(Text, 256, "%s %s", entity_Names[i], entity_Names[i + 1]);
-                                        UISet.Type = UISet.Name = Text;
-                                        AddUIElement(GameState->UIState, UI_Button, UISet);
+                                    for(u32 i = 0; i < ArrayCount(entity_Names) - 1; i += 1) {
+                                        
+                                        introspect_info *Info = entity_Names + i;
+                                        
+                                        u32 CharCount = 256;
+                                        char *Text = PushArray(&GameState->StringArena, char, CharCount);
+                                        char *At = Text;
+                                        s32 SizeOfString = PrintS(Text, CharCount, "%s %s: ", Info->Type, Info->Name);
+                                        At += SizeOfString;
+                                        
+                                        u32 Offset = Info->Offset;
+                                        
+                                        UISet.Type = Info->Type;
+                                        UISet.ValueLinkedToPtr = ((u8 *)Entity) + Offset;
+                                        UISet.Name = Text;
+                                        
+                                        //This doesn't free the arena memory! We could make the temp ui structs more of a thing where we have a sub arena we clear each time...? Oliver 2/11/17
+                                        memory_arena *TempArena = &UIState->TempArena;
+                                        InitCharBuffer(&UISet.Buffer, 256, TempArena, TempArena);
+                                        AddUIElement(GameState->UIState, UI_TextBox, UISet);
                                     }
                                 }
                                 PopUIElement(GameState->UIState);
                                 
-                                UIState->TempUIStack = UIState->Elements + ElmIndex;
+                                //This is to remove the stack later;
+                                ui_element *ParentElm = UIState->Elements[ParentElmIndex].Parent;
+                                Assert(ParentElm);
+                                UIState->TempUIStack = ParentElm;
+                            } else {
+                                InvalidCodePath;
                             }
 #endif
                             

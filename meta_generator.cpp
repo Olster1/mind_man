@@ -65,7 +65,6 @@ static void *ReadFileWithNullTerminator(char *FileName)
 enum file_handle {
     KEY_FUNCTIONS_FILE,
     KEY_TYPES_FILE, 
-    META_FILE,
     ENUM_STRUCTS,
     INTROSPECT_STRUCTS,
     
@@ -465,9 +464,9 @@ static expanded_words ExpandOnUnderscore(char *Text, u32 Length) {
     return Result;
 }
 
-static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char *End, token EnumName, expanded_words Words, char *ArrayTypeAsString, file_handle FileHandle) {
+static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char *End, token EnumName, expanded_words Words, char *ArrayTypeAsString, file_handle FileHandle, char *ArrayType = 0) {
     
-    char cb[2048];
+    char cb[4*2048];
     char *At = cb;
     size_t LastSize = 0;
     if(ArrayTypeAsString) {
@@ -484,19 +483,34 @@ static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char 
         if(i == Words.Count - 1 && !ArrayTypeAsString) {
             Comma = "";
         }
-        sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, Comma);
+        
+        if(ArrayType) {
+            if(StringCompare(ArrayType, "INTROSPECT")) {
+                i++;
+                if(i == Words.Count - 1) {
+                    Comma = "";
+                }
+                Assert(i < Words.Count);
+                string NextWord = Words.Strings[i];
+                sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, NextWord.Length, NextWord.E, EnumName.TextLength, EnumName.Text, NextWord.Length, NextWord.E, Comma);
+            } 
+        } else {
+            sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, Comma);
+        }
+        
         At += StringLength(cb) - LastSize;
         LastSize = At - cb;
         Assert(LastSize < ArrayCount(cb));
     }
     
-    // NOTE(NAME): This is putting the type at the end of the char * array, so we can match strings to get type info!
-    if(ArrayTypeAsString) {
-        sprintf_s(At, sizeof(cb) - (At - cb), "\"%.*s\"", EnumName.TextLength, EnumName.Text);
-        At += StringLength(cb) - LastSize;
+    if(!ArrayType) {
+        // NOTE(NAME): This is putting the type at the end of the char * array, so we can match strings to get type info!
+        if(ArrayTypeAsString) {
+            sprintf_s(At, sizeof(cb) - (At - cb), "\"%.*s\"", EnumName.TextLength, EnumName.Text);
+            At += StringLength(cb) - LastSize;
+        }
+        //////
     }
-    //////
-    
     sprintf_s(At, sizeof(cb) - (At - cb), End);
     fwrite(cb, StringLength(cb), 1,Tokenizer->FileHandles[FileHandle]);
     
@@ -529,6 +543,8 @@ ParseEnumArray(tokenizer *Tokenizer, token Token) {
     ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0, ENUM_STRUCTS);
 }
 
+#define AddWord(ArrayName, Token) {if(NameCount < 2) {string *Word = &ArrayName.Strings[ArrayName.Count++];Word->E = Token.Text; Word->Length = Token.TextLength;}}
+
 static void 
 ParseStructArray(tokenizer *Tokenizer, token Token) {
     expanded_words Words = {}; 
@@ -542,19 +558,24 @@ ParseStructArray(tokenizer *Tokenizer, token Token) {
     Token = GetNextToken(Tokenizer);
     Assert(Token.Type == Token_OpenBracket);
     
+    u32 NameCount = 0;
     while(Token.Type != Token_CloseBracket) {
         Token = GetNextToken(Tokenizer);
         
-        if(Token.Type == Token_VariableName || Token.Type == Token_VariableType) {
-            string *Word = &Words.Strings[Words.Count++];
-            Word->E = Token.Text;
-            Word->Length = Token.TextLength;
+        if(Token.Type == Token_VariableName) {
+            AddWord(Words, Token);
+            NameCount++;
+        } else if(Token.Type == Token_VariableType) {
+            AddWord(Words, Token);
+            NameCount++;
         } else if(Token.Type == Token_ForwardSlash) {
             EatComments(Tokenizer, Token);
-        } 
+        } else if(Token.Type == Token_SemiColon) {
+            NameCount = 0;
+        }
     }
     
-    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "\"%.*s\"%s", "};\n", EnumName, Words, "char *", INTROSPECT_STRUCTS);
+    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "{\"%.*s\", \"%.*s\", (intptr)&(((%.*s *)0)->%.*s)}%s", "};\n", EnumName, Words, "introspect_info ", INTROSPECT_STRUCTS, "INTROSPECT");
     
     //ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0, INTROSPECT_STRUCTS);
     
@@ -587,7 +608,7 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
             if(Str.Length == 1) {
                 sprintf_s(cb, sizeof(cb), "{%.*s, '%.*s'}, ", Token.TextLength, Token.Text, Str.Length, Str.E);
                 
-                fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[META_FILE]);
+                fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[KEY_TYPES_FILE]);
                 
             }
             
@@ -1216,12 +1237,12 @@ static FILE *OpenFileHandle(char *FileName) {
 
 int main(int argc, char* argv[])
 {
-    char *FileNames[] = {"calm_win32.cpp", "calm_entity.h", "calm_ui.cpp", "calm_game.h"}; //change this to read all .cpp files
+    char *FileNames[] = {"calm_win32.cpp", "calm_entity.h", "calm_ui.h", "calm_game.h"}; //change this to read all .cpp files
     
     tokenizer Tokenizer = {};
     
     Tokenizer.FileHandles[KEY_TYPES_FILE] = OpenFileHandle("meta_keys.h");
-    Tokenizer.FileHandles[META_FILE] = OpenFileHandle("calm_meta.h");
+    
     Tokenizer.FileHandles[KEY_FUNCTIONS_FILE] = OpenFileHandle("meta_key_functions.h");
     Tokenizer.FileHandles[ENUM_STRUCTS] = OpenFileHandle("meta_enum_arrays.h");
     Tokenizer.FileHandles[INTROSPECT_STRUCTS] = OpenFileHandle("meta_introspect_struct_arrays.h");

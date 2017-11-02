@@ -7,9 +7,13 @@ static char *search_type_Names[] = {
 static search_type search_type_Values[] = {
 SEARCH_VALID_SQUARES, SEARCH_INVALID_SQUARES, SEARCH_FOR_TYPE};
 static char *element_ui_type_Names[] = {
-"UI_Parent", "UI_Moveable", "UI_DropDownBoxParent", "UI_DropDownBox", "UI_Slider", "UI_CheckBox", "UI_Button", "UI_Entity", "element_ui_type"};
+"UI_Parent", "UI_Moveable", "UI_DropDownBoxParent", "UI_DropDownBox", "UI_Slider", "UI_CheckBox", "UI_TextBox", "UI_Button", "UI_Entity", "element_ui_type"};
 static element_ui_type element_ui_type_Values[] = {
-UI_Parent, UI_Moveable, UI_DropDownBoxParent, UI_DropDownBox, UI_Slider, UI_CheckBox, UI_Button, UI_Entity};
+UI_Parent, UI_Moveable, UI_DropDownBoxParent, UI_DropDownBox, UI_Slider, UI_CheckBox, UI_TextBox, UI_Button, UI_Entity};
+static char *ui_loop_type_Names[] = {
+"UI_CHILD_LOOP", "UI_OUTER_LOOP", "ui_loop_type"};
+static ui_loop_type ui_loop_type_Values[] = {
+UI_CHILD_LOOP, UI_OUTER_LOOP};
 static char *chunk_type_Names[] = {
 "ChunkNull", "ChunkLight", "ChunkDark", "ChunkBlock", "ChunkDoor", "ChunkMain", "ChunkTypeCount", "chunk_type"};
 static chunk_type chunk_type_Values[] = {

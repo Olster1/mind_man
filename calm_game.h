@@ -91,6 +91,7 @@ enum chunk_type {
 #include "calm_audio.h"
 #include "calm_particles.h"
 #include "calm_animation.h"
+#include "calm_world_chunk.h"
 #include "calm_entity.h"
 #include "calm_menu.h"
 
@@ -103,16 +104,6 @@ enum game_mode {
 };
 
 static r32 WorldChunkInMeters = 1.0f;
-
-struct world_chunk {
-    s32 X;
-    s32 Y;
-    
-    chunk_type Type;
-    chunk_type MainType;
-    
-    world_chunk *Next;
-};
 
 enum tile_pos_type {
     NULL_TILE,
@@ -137,8 +128,6 @@ struct tile_type_layout {
     s32 E[3][3];
 };
 
-
-#define WORLD_CHUNK_HASH_SIZE 4096
 
 struct ui_state;
 struct game_state

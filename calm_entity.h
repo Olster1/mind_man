@@ -72,9 +72,11 @@ Introspect struct entity {
     u32 CheckPointParentCount; 
     u32 CheckPointParentIds[32];
     //
-    u32 CheckPointParentAt; // Find this via a search
+    //u32 CheckPointParentAt; // Find this via a search
     u32 CheckPointAt; //For looping through
     //
+    
+    world_chunk *ParentCheckPointIds[WORLD_CHUNK_HASH_SIZE]; 
     
     // NOTE(OLIVER): This is for the check_points 
     loaded_sound *SoundToPlay;

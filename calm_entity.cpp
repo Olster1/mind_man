@@ -526,12 +526,6 @@ internal inline b32 LookingForPosition(entity *Entity, v2i Pos) {
     return Result;
 }
 
-internal inline void MarkAsDeprecated(ui_state *UIState, ui_element *Elm) {
-    Elm->IsValid = false;
-    Assert(UIState->FreeElmCount < ArrayCount(UIState->ElementsFree));
-    UIState->ElementsFree[UIState->FreeElmCount++] = Elm->Index;
-}
-
 internal inline b32  
 RemoveEntityUIElement(ui_state *UIState, entity *Entity, game_state *GameState) {
     Assert(UIState->ElmCount < ArrayCount(UIState->Elements));
