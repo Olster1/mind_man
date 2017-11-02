@@ -1077,7 +1077,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->UIState = PushStruct(&GameState->MemoryArena, ui_state);
         
-        GameState->UIState->TempArena = SubMemoryArena(&GameState->MemoryArena, KiloBytes(1));
+        GameState->UIState->TempArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(1));
         
         /////////////////////////////////
         
@@ -1517,14 +1517,23 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     ClearBuffer(&DebugConsole.Input);
                 }
                 
-            } else if (GameState->UIState->InteractingWith->Type == UI_TextBox) {
+            } else if (GameState->UIState->InteractingWith && GameState->UIState->InteractingWith->Type == UI_TextBox) {
                 
                 ui_state *UIState = GameState->UIState;
-                EmptyMemoryArena(&UIState->TempArena);
+                
                 
                 ui_element *Elm = UIState->InteractingWith;
                 
                 char_buffer *ElmBuffer = &Elm->Set.Buffer;
+                if(WasPressed(Memory->GameButtons[Button_Arrow_Left])) {
+                    ElmBuffer->WriteIndexAt = Max(0, (s32)ElmBuffer->WriteIndexAt - 1);
+                    //DebugConsole.InputTimer.Value = 0;
+                }
+                if(WasPressed(Memory->GameButtons[Button_Arrow_Right])) {
+                    ElmBuffer->WriteIndexAt = Min(ElmBuffer->IndexAt, ElmBuffer->WriteIndexAt + 1);
+                    //DebugConsole.InputTimer.Value = 0;
+                }
+                
                 for(u32 KeyIndex = 0; KeyIndex <= Memory->SizeOfGameKeys; ++KeyIndex) {
                     
                     game_button *Button = Memory->GameKeys + KeyIndex;
@@ -1536,10 +1545,21 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 Splice_("", ElmBuffer, -1);
                             } break;
                             default: {
-                                AddToInBuffer("%s", &KeyIndex);
+                                AddToBufferGeneral(ElmBuffer, "%s", &KeyIndex);
                             }
                         }
                     }
+                }
+                
+                
+                if(WasPressed(Memory->GameButtons[Button_Enter])) {
+                    //Finished with editing the box
+                    //We have to now parse the data here!
+                    //  Next time on mind man! 
+                    //
+                    ClearBuffer(ElmBuffer);
+                    UIState->InteractingWith = 0;
+                    EmptyMemoryArena(&UIState->TempArena);
                 }
                 
             } else {
@@ -2390,12 +2410,24 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             } else {
                                 
                                 //NOTE: This is interactable objects;
+                                
                                 Assert(NextHotEntity->IsValid);
                                 UIState->HotEntity = NextHotEntity;
                                 UIState->InteractingWith = UIState->HotEntity;
-                                if(UIState->InteractingWith->Type == UI_Entity) {
-                                    GetEntityFromElement(UIState);
-                                    Entity->RollBackPos = Entity->Pos;
+                                
+                                ui_element *InteractEnt = UIState->InteractingWith;
+                                
+                                switch (UIState->InteractingWith->Type) {
+                                    case UI_Entity: {
+                                        GetEntityFromElement(UIState);
+                                        Entity->RollBackPos = Entity->Pos;
+                                    } break;
+                                    case UI_TextBox: {
+                                        
+                                    } break;
+                                    default: {
+                                        AddToOutBuffer("There is no initial interaction for the object type \"%s\"\n", element_ui_type_Names[InteractEnt->Type]);
+                                    }
                                 }
                             }
                         }
@@ -2475,7 +2507,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 
                                 Entity->Pos = WorldChunkInMeters*GetGridLocationR32(MouseP_PerspectiveSpace + CamPos);
                                 v2 P = (MouseP_PerspectiveSpace + CamPos);
-                                AddToOutBuffer("%f\n", P.X);
+                                
                                 
                                 SetChunkType(GameState, Entity->Pos, ChunkBlock);
                             } else {
@@ -2512,9 +2544,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                         UISet.ValueLinkedToPtr = ((u8 *)Entity) + Offset;
                                         UISet.Name = Text;
                                         
-                                        //This doesn't free the arena memory! We could make the temp ui structs more of a thing where we have a sub arena we clear each time...? Oliver 2/11/17
                                         memory_arena *TempArena = &UIState->TempArena;
                                         InitCharBuffer(&UISet.Buffer, 256, TempArena, TempArena);
+                                        
                                         AddUIElement(GameState->UIState, UI_TextBox, UISet);
                                     }
                                 }
