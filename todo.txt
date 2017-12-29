@@ -1,0 +1,15 @@
+-- Put notes in -> test a starwars riff
+-- Put particle system for notes 
+-- parse pointer types 
+
+-- Have clear idea of when the philosoher is looking for the player. -> Maybe put a console writing to what state the philosopher is in. 
+
+-- camera in the way of the place of entities
+
+FINISHED:
+-- Find the box bug that makes the main type get overridden ? Finished?
+
+ 
+
+
+

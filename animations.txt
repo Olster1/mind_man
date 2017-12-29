@@ -1,0 +1,25 @@
+
+        GameState->LanternAnimationCount = 0;
+        
+        char *FileNames[16] = {"lantern_man/lm_run_left_l.bmp",
+            "lantern_man/lm_run_left_r.bmp"};
+        
+        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 2, PI32, "LaternMan_RunLeft");
+        
+        FileNames[0] = "lantern_man/lm_stand_left.bmp";
+        
+        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, PI32, "LanternMan_IdleLeft");
+        
+        FileNames[0] = "lantern_man/lm_run_right_l.bmp";
+        FileNames[1] = "lantern_man/lm_run_right_r.bmp";
+        
+        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 2, 0, "LanternMan_RunRight");
+        
+        FileNames[0] = "lantern_man/lm_stand_right.bmp";
+        
+        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, 0, "LanternMan_IdleRight");
+        
+        FileNames[0] = "lantern_man/lm_front.bmp";
+        
+        InitAnimation(&GameState->LanternManAnimations[GameState->LanternAnimationCount++], Memory, FileNames, 1, PI32*1.5f, "LanternMan_IdleFront");
+        
