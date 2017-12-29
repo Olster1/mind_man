@@ -1,11 +1,15 @@
-PROGRAMMING:
--- Generic tile type for entities to say other things can't move here for other entities etc. 
--- W
+-- Put notes in -> test a starwars riff
+-- Put particle system for notes 
+-- parse pointer types 
 
-ART: 
-Takes pictures of grant's castles and put in game
-  
-Do text sizes on the renderer. 
-  
+-- Have clear idea of when the philosoher is looking for the player. -> Maybe put a console writing to what state the philosopher is in. 
+
+-- camera in the way of the place of entities
+
+FINISHED:
+-- Find the box bug that makes the main type get overridden ? Finished?
+
+ 
+
 
 

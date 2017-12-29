@@ -6,6 +6,19 @@
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
 
+loaded_sound *FindSound(game_state *State, char *NameId) {
+    loaded_sound *Result = 0;
+    // TODO(OLIVER): Put all sounds through this array of sounds...
+    for(u32 i = 0; i < State->PushSoundCount; ++i) {
+        loaded_sound *Sound = State->PushSound + i;
+        if(DoStringsMatch(NameId, Sound->FileName)) {
+            Result = Sound;
+        }
+    }
+    
+    return Result;
+}
+
 #define CharToUInt(a, b, c, d) (((uint32)(a) << 0) |  ((uint32)(b) << 8) |((uint32)(c) << 16) | ((uint32)(d) << 24))
 
 enum wav_ID
@@ -214,6 +227,8 @@ LoadWavFileDEBUG(game_memory *Memory, char *FileName, u32 StartSampleIndex, u32 
         }
     }
     
+    // Implement this so we don't have to specify the file type: ParseNameWithoutFileType
+    Result.FileName = FileName;
     return Result;
     
 }

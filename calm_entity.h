@@ -10,7 +10,7 @@ enum entity_type
     Entity_Camera,
     Entity_Dropper,
     Entity_Home,
-    Entity_Door,
+    Entity_Note,
     Entity_CheckPoint,
     Entity_CheckPointParent,
     ///////
@@ -44,6 +44,11 @@ Introspect struct entity {
     v2 Velocity;
     v2 Dim;
     
+    // NOTE(OLIVER): This is for the 'Notes' entities. 
+    char *SoundToPlay;
+    u32 LastFrameEntityID;
+    //
+    
     // NOTE(Oliver): This is for the chunk changer
     u32 ChunkAt;
     u32 ChunkListCount;
@@ -64,27 +69,22 @@ Introspect struct entity {
     v2 RollBackPos;
     //
     r32 Time;
-    //particle_system ParticleSystem;
+    particle_system ParticleSystem;
     
-    // NOTE(OLIVER): this is for the philosophers checkpoints
-    //SAVED
-    //Maybe combine these with the checkpoints used by the check point parents
-    u32 CheckPointParentCount; 
-    u32 CheckPointParentIds[32];
-    //
-    //u32 CheckPointParentAt; // Find this via a search
     u32 CheckPointAt; //For looping through
     //
     
     world_chunk *ParentCheckPointIds[WORLD_CHUNK_HASH_SIZE]; 
     
     // NOTE(OLIVER): This is for the check_points 
-    loaded_sound *SoundToPlay;
+    u32 CheckPointParentID;
     //
     
     // NOTE(OLIVER): This is for the check_point parents
     u32 CheckPointCount;
     u32 CheckPointIds[16];
+    u32 CheckPointComplete[16];
+    b32 IsOpen; // this is for the checkpoint parents to act as doors. 
     //
     
     // NOTE(OLIVER): This is for the philosopher AI random walk
@@ -101,7 +101,7 @@ Introspect struct entity {
     
     path_nodes Path;
     
-    b32 IsAtEndOfMove;
+    b32 WentToNewMove;
     
     v2 EndOffsetTargetP;
     v2 BeginOffsetTargetP;

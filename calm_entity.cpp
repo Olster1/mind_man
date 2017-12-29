@@ -433,12 +433,6 @@ inline void AddChunkTypeToChunkChanger(entity *Entity, chunk_type Type) {
     Entity->ChunkList[Entity->ChunkListCount++] = Type;
 }
 
-inline void AddCheckPointParentIDToEntity(entity *Entity, u32 ChildID) {
-    Assert(Entity->Type == Entity_Philosopher);
-    Assert(Entity->CheckPointParentCount < ArrayCount(Entity->CheckPointParentIds));
-    Entity->CheckPointParentIds[Entity->CheckPointParentCount++] = ChildID;
-}
-
 inline void AddCheckPointIDToCheckPointParent(entity *Entity, u32 ChildID) {
     Assert(Entity->Type == Entity_CheckPointParent);
     Assert(Entity->CheckPointCount < ArrayCount(Entity->CheckPointIds));
@@ -452,8 +446,36 @@ inline void EndPath(entity *Entity) {
     }
 }
 
+inline v2i GetGridLocation(v2 Pos) {
+    r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
+    
+    v2i Result = ToV2i_floor(MetersToWorldChunks*Pos + V2(0.5f, 0.5f)); 
+    
+    return Result;
+}
+
+inline v2i GetClosestGridLocation(v2 Pos) {
+    r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
+    
+    v2i Result = ToV2i_ceil(MetersToWorldChunks*Pos); 
+    
+    return Result;
+}
+
+inline v2 GetClosestGridLocationR32(v2 Pos) {
+    v2i TempLocation = GetClosestGridLocation(Pos);
+    v2 Result = V2i(TempLocation.X, TempLocation.Y);
+    return Result;
+}
+
+inline v2 GetGridLocationR32(v2 Pos) {
+    v2i TempLocation = GetGridLocation(Pos);
+    v2 Result = V2i(TempLocation.X, TempLocation.Y);
+    return Result;
+}
+
 inline entity *
-InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, animation *Animation = 0) {
+InitEntity_(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, animation *Animation = 0) {
     Assert(GameState->EntityCount < ArrayCount(GameState->Entities));
     
     u32 EntityIndex = GameState->EntityCount++;
@@ -477,10 +499,13 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, anim
     Entity->LifeSpan = 10.0f;
     Entity->ChunkTimer = {};
     Entity->ChunkTimer.Period = 1.0f;
+    Entity->WentToNewMove = true;
+    //Entity->SoundToPlay = "";
     
     Entity->AnimationListSentintel = {}; 
     Entity->AnimationListSentintel.Next = Entity->AnimationListSentintel.Prev = &Entity->AnimationListSentintel; 
     
+    particle_system_settings ParticlesSet = InitParticlesSettings();
     switch(Type) {
         case (Entity_Player): {
             
@@ -488,6 +513,11 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, anim
         } break;
         case (Entity_Philosopher): {
             AddAnimationToList(GameState, &GameState->MemoryArena, Entity, FindAnimation(GameState->ManAnimations, GameState->ManAnimationCount, "Man_Idle"));
+        } break;
+        case (Entity_CheckPoint): {
+            //We just default to this sound for testing, but will manually change it in the editor. 
+            Entity->SoundToPlay = "GNOtes1.wav";
+            PushBitmap(&ParticlesSet, &GameState->Monster);
         } break;
         default: {
             //No animation for entity
@@ -497,11 +527,12 @@ InitEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type Type, u32 ID, anim
     //Entity->LastMoves;
     Entity->LastMoveAt = 0;
     Entity->LastSearchPos = V2int(MAX_S32, MAX_S32); //Invalid postion
-    /*
-    particle_system_settings Set = InitParticlesSettings();
-    Set.LifeSpan = 0.9f;
-    InitParticleSystem(&Entity->ParticleSystem, &Set, 12);
-    */
+    
+    
+    ParticlesSet.LifeSpan = 0.9f;
+    InitParticleSystem(&Entity->ParticleSystem, &ParticlesSet, 12);
+    Entity->ParticleSystem.Active = false;
+    
 #if INTERNAL_BUILD
     
     ui_element_settings Set = {};

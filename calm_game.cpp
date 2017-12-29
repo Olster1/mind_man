@@ -11,69 +11,24 @@
 #include "calm_render.cpp"
 #include "calm_menu.cpp"
 #include "calm_console.cpp"
+#include "calm_particles.cpp"
 #include "calm_ui.h"
 #include "calm_animation.cpp"
+#include "calm_world_chunk.cpp"
 #include "calm_entity.cpp"
 #include "calm_meta.h"
 #include "meta_enum_arrays.h"
 #include "meta_introspect_struct_arrays.h"
 
-#define GetChunkHash(X, Y) (Abs(X*19 + Y*23) % WORLD_CHUNK_HASH_SIZE)
-internal world_chunk *GetOrCreateWorldChunk(world_chunk **Chunks, s32 X, s32 Y, memory_arena *Arena, chunk_type Type, world_chunk **FreeListPtr = 0) {
-    
-    u32 HashIndex = GetChunkHash(X, Y);
-    world_chunk *Chunk = Chunks[HashIndex];
-    world_chunk *Result = 0;
-    
-    while(Chunk) {
-        
-        if(Chunk->X == X && Chunk->Y == Y) {
-            Result = Chunk;
-            break;
-        }
-        
-        Chunk = Chunk->Next;
-    } 
-    
-    if(!Result && Arena) {
-        Assert(Type != ChunkNull);
-        if(FreeListPtr && *FreeListPtr) {
-            Result = *FreeListPtr;
-            *FreeListPtr = (*FreeListPtr)->Next;
-        } else {
-            Result = PushStruct(Arena, world_chunk);
-        }
-        Result->X = X;
-        Result->Y = Y;
-        Result->MainType = Result->Type = Type;
-        Result->Next = Chunks[HashIndex];
-        Chunks[HashIndex] = Result;
-    }
-    
-    return Result;
+
+inline void SetEditorMode(ui_state *UIState, editor_mode Mode) {
+    UIState->EditorMode = {(u32)Mode, editor_mode_Values, editor_mode_Names[(u32)Mode]};
 }
 
-internal b32
-RemoveWorldChunk(world_chunk **Chunks, s32 X, s32 Y, world_chunk **FreeListPtr) {
-    
-    b32 Removed = false;
-    u32 HashIndex = GetChunkHash(X, Y);
-    world_chunk **ChunkPtr = Chunks + HashIndex;
-    
-    while(*ChunkPtr) {
-        world_chunk *Chunk = *ChunkPtr;
-        if(Chunk->X == X && Chunk->Y == Y) {
-            (*ChunkPtr) = Chunk->Next;
-            Chunk->Next = *FreeListPtr;
-            *FreeListPtr = Chunk;
-            Removed = true;
-            break;
-        }
-        
-        ChunkPtr = &Chunk->Next;
-    } 
-    return Removed;
+inline void SetEntityTypeMode(ui_state *UIState, entity_type Type) {
+    UIState->InitInfo = {(u32)Type, entity_type_Values, entity_type_Names[(u32)Type]};
 }
+
 
 internal inline tile_pos_type GetTilePosType(world_chunk **Chunks, s32 X, s32 Y) {
     tile_pos_type Result = NULL_TILE;
@@ -444,34 +399,6 @@ internal v2i SearchForClosestValidChunkType(game_state *GameState, v2i StartP, c
     return Result;
 }
 
-inline v2i GetGridLocation(v2 Pos) {
-    r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
-    
-    v2i Result = ToV2i_floor(MetersToWorldChunks*Pos + V2(0.5f, 0.5f)); 
-    
-    return Result;
-}
-
-inline v2i GetClosestGridLocation(v2 Pos) {
-    r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
-    
-    v2i Result = ToV2i_ceil(MetersToWorldChunks*Pos); 
-    
-    return Result;
-}
-
-inline v2 GetClosestGridLocationR32(v2 Pos) {
-    v2i TempLocation = GetClosestGridLocation(Pos);
-    v2 Result = V2i(TempLocation.X, TempLocation.Y);
-    return Result;
-}
-
-inline v2 GetGridLocationR32(v2 Pos) {
-    v2i TempLocation = GetGridLocation(Pos);
-    v2 Result = V2i(TempLocation.X, TempLocation.Y);
-    return Result;
-}
-
 inline void SetChunkType(game_state *GameState, v2 Pos, chunk_type ChunkType) {
     v2i GridLocation = GetGridLocation(Pos);
     world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, (s32)GridLocation.X, (s32)GridLocation.Y, 0, ChunkNull);
@@ -498,6 +425,9 @@ inline b32 IsValidGridPosition(game_state *GameState, v2 WorldPos) {
 
 inline b32 HasMovesLeft(entity *Entity) {
     b32 Result = Entity->VectorIndexAt < Entity->Path.Count;
+    if(Entity->Type == Entity_Philosopher ) {
+        BreakPoint;
+    }
     return Result;
 }
 
@@ -528,11 +458,9 @@ internal inline b32 IsValidChunkType(game_state *GameState, entity *Entity, v2i 
     return Result;
 }
 
-internal b32 UpdateEntityPositionViaFunction(game_state *GameState, entity *Entity, r32 dt) {
-    b32 WentToNewMove = false;
-    Entity->IsAtEndOfMove = true;
+internal void UpdateEntityPositionViaFunction(game_state *GameState, entity *Entity, r32 dt) {
     if(HasMovesLeft(Entity)) {
-        Entity->IsAtEndOfMove = false;
+        Entity->WentToNewMove = false;
         Assert(Entity->VectorIndexAt > 0);
         v2i GridA = ToV2i(Entity->Path.Points[Entity->VectorIndexAt - 1]);
         v2 A = WorldChunkInMeters*V2i(GridA);
@@ -540,12 +468,26 @@ internal b32 UpdateEntityPositionViaFunction(game_state *GameState, entity *Enti
         v2i GridB = ToV2i(Entity->Path.Points[Entity->VectorIndexAt]);
         v2 B = WorldChunkInMeters*V2i(GridB);
         
+        v2i StartP = GetGridLocation(A);
+        
+        v2i EndP = GetGridLocation(B);
+        
+        world_chunk *StartChunk = GetOrCreateWorldChunk(GameState->Chunks, StartP.X, StartP.Y, 0, ChunkNull);
+        StartChunk->Type = StartChunk->MainType;
+        //Assert(StartChunk->Type == ChunkEntity);
+        
+        
+        world_chunk *EndChunk = GetOrCreateWorldChunk(GameState->Chunks, EndP.X, EndP.Y, 0, ChunkNull);
+        
+        EndChunk->Type = EndChunk->MainType;
         if(!IsValidChunkType(GameState, Entity, GridB)) {
             chunk_type Types[] = {ChunkLight, ChunkDark};
+            
             v2i NewPos = SearchForClosestValidChunkType(GameState, GridA, Types,ArrayCount(Types));
             Entity->Pos = WorldChunkInMeters*V2i(NewPos);
-            
         }
+        
+        EndChunk->Type = ChunkEntity;
         
         Entity->MoveT += dt;
         
@@ -563,8 +505,10 @@ internal b32 UpdateEntityPositionViaFunction(game_state *GameState, entity *Enti
             Entity->Pos = B;
             Entity->MoveT -= Entity->MovePeriod;
             Entity->VectorIndexAt++;
-            WentToNewMove = true;
-            Entity->IsAtEndOfMove = false;
+            Entity->WentToNewMove = true;
+            
+            EndChunk->Type = ChunkEntity;
+            
 #if 1
             if(HasMovesLeft(Entity)) {
                 
@@ -580,10 +524,12 @@ internal b32 UpdateEntityPositionViaFunction(game_state *GameState, entity *Enti
 #endif
         }
     } else {
+        if(Entity->Type == Entity_Philosopher) {
+            BreakPoint;
+        }
         Entity->Velocity = {};
     }
     
-    return WentToNewMove;
 }
 
 internal b32 IsPartOfPath(s32 X, s32 Y, path_nodes *Path) {
@@ -611,27 +557,52 @@ inline void AddWorldChunks(game_state *GameState, u32 Count, s32 Min, s32 Max, c
     
 }
 
+inline b32 IsSolidDefault(entity_type Type) {
+    b32 Result = true;
+    if(Type == Entity_CheckPoint || 
+       Type == Entity_Note || 
+       Type == Entity_Dropper || 
+       Type == Entity_Camera) {
+        Result = false;
+    }
+    return Result;
+}
+
+inline b32 IsSolid(entity *Ent) {
+    entity_type Type = Ent->Type;
+    
+    b32 Result = IsSolidDefault(Type);
+    
+    if(Type == Entity_CheckPointParent && Ent->IsOpen) {
+        Result = false;
+    }
+    
+    return Result;
+}
+
 inline entity *
-AddEntity(game_state *GameState, v2 Pos, entity_type EntityType, v2 Dim) {
+AddEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type EntityType, u32 ID, animation *Animation = 0) {
+    
+    entity *Ent = InitEntity_(GameState, Pos, Dim, EntityType, ID);
+    //All entities can move of light chunks
+    AddChunkType(Ent, ChunkLight);
+    
     world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, (s32)Pos.X, (s32)Pos.Y, 0, ChunkNull);
-    if(Chunk) { 
-        if(EntityType == Entity_Block) { Chunk->Type = ChunkBlock; }
-    } else {
-        chunk_type ChunkType = (EntityType == Entity_Block) ? ChunkBlock: ChunkLight;
+    if(!Chunk) {
+        chunk_type ChunkType = IsSolid(Ent) ? ChunkEntity: ChunkLight;
         Chunk = GetOrCreateWorldChunk(GameState->Chunks, (s32)Pos.X, (s32)Pos.Y, &GameState->MemoryArena, ChunkType, &GameState->ChunkFreeList);
         Chunk->MainType = ChunkLight;
     }
     
-    entity *Block = InitEntity(GameState, Pos, Dim, EntityType, GameState->EntityIDAt++);
-    AddChunkType(Block, ChunkLight);
-    if(EntityType != Entity_Philosopher) {
-        AddChunkType(Block, ChunkDark);
-    }
-    if(EntityType == Entity_Block) {
-        AddChunkType(Block, ChunkBlock);
+    if(IsSolid(Ent)) { Chunk->Type = ChunkEntity; }
+    
+    if(Ent->Type != Entity_Philosopher && Ent->Type != Entity_CheckPointParent && 
+       Ent->Type != Entity_CheckPoint) { //All entities except philosopher, checkpoints and checkpoint parents can exist on the dark chunk types
+        AddChunkType(Ent, ChunkDark);
     }
     
-    return Block;
+    
+    return Ent;
 }
 
 #define GetEntity(State, Pos, Type, ...) GetEntity_(State, Pos, Type, __VA_ARGS__)
@@ -663,12 +634,18 @@ inline internal rect2 GetEntityInCameraSpace(entity *Entity, v2 CamPos) {
 }
 
 internal b32 
-InitializeMove(game_state *GameState, entity *Entity, v2 TargetP_r32, b32 StrictMove = false, loaded_sound *Sound = 0) {
+InitializeMove(game_state *GameState, entity *Entity, v2 TargetP_r32, b32 StrictMove = false) {
     
     r32 MetersToWorldChunks = 1.0f / WorldChunkInMeters;
     
     v2i TargetP = ToV2i_floor(MetersToWorldChunks*TargetP_r32); 
     v2i StartP = GetGridLocation(Entity->Pos);
+    
+    //We set the chunk type we are on to its main type just so we can walk since no entity can walk on ChunkType_entity. We set it back after it has calculated the move. Is there are better way we can do this? Oliver 6/11/17
+    world_chunk *ChunkOn = GetOrCreateWorldChunk(GameState->Chunks, StartP.X, StartP.Y, 0, ChunkNull);
+    Assert(ChunkOn->Type == ChunkEntity);
+    ChunkOn->Type = ChunkOn->MainType;
+    //
     
     if(StrictMove) {
         memory_arena *TempArena = &GameState->ScratchPad;
@@ -703,11 +680,12 @@ InitializeMove(game_state *GameState, entity *Entity, v2 TargetP_r32, b32 Strict
     }
 #endif
     
+    
     Entity->BeginOffsetTargetP = Entity->Pos- WorldChunkInMeters*ToV2(StartP); 
     Entity->EndOffsetTargetP = TargetP_r32 - WorldChunkInMeters*ToV2(TargetP);
     
     Entity->Path.Count = 0;
-    Entity->Path.Sound = Sound;
+    
     b32 FoundTargetP =  RetrievePath(GameState, TargetP, StartP, &Entity->Path, Entity->ValidChunkTypes, Entity->ChunkTypeCount);
     if(FoundTargetP) {
         v2 * EndPoint = Entity->Path.Points + (Entity->Path.Count - 1);
@@ -720,6 +698,25 @@ InitializeMove(game_state *GameState, entity *Entity, v2 TargetP_r32, b32 Strict
         Entity->MoveT = 0;
     }
     
+    //This is us setting is back to the entity type chunk, which we changed at the start of the function
+    //We don't want other entities to move onto where we are moving, kind of like multiple threads. We don't want to do this in the move function since someone could have moved to where we are moving between then an now. Instead we set the where we are moving to be an entity chunk  and don't set the ChunkOn back to an entity taken chunk. Oliver 10/11/17
+    
+    
+    if(FoundTargetP) {
+        Assert(Entity->Path.Count);
+        
+        v2i NextP = ToV2i(Entity->Path.Points[0]);
+        world_chunk *NextChunk = GetOrCreateWorldChunk(GameState->Chunks, NextP.X, NextP.Y, 0, ChunkNull);
+        Assert(NextChunk);
+        //Do we want to store the chunk type on the entities if we have more than chunk types for entities?
+        //
+        NextChunk->Type = ChunkEntity;
+    } else {
+        ChunkOn->Type = ChunkEntity;
+    }
+    //
+    
+    
     return FoundTargetP;
 }
 
@@ -730,7 +727,7 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
     temp_memory TempMem = MarkMemory(&GameState->ScratchPad);
     if(!Handle.HasErrors) {
         
-        u32 TotalSize = KiloBytes(1);
+        u32 TotalSize = MegaBytes(2);
         char *MemoryToWrite = (char *)PushSize(&GameState->ScratchPad, TotalSize);
         char *MemoryAt = MemoryToWrite;
         
@@ -749,12 +746,12 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
         }
         
         //// Writing ENTITIES 
-        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//ENTITIES Pos Dim Type ID\n");
+        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//ENTITIES Pos Dim Type ID CheckpointParentID\n");
         
         for(u32 i = 0; i < GameState->EntityCount; ++i) {
             entity *Entity = GameState->Entities + i;
             
-            MemoryAt +=  PrintS(MemoryAt, GetSize(), "%f %f %f %f %d %d ", Entity->Pos.X, Entity->Pos.Y, Entity->Dim.X, Entity->Dim.Y, Entity->Type, Entity->ID);
+            MemoryAt +=  PrintS(MemoryAt, GetSize(), "%f %f %f %f %d %d %d ", Entity->Pos.X, Entity->Pos.Y, Entity->Dim.X, Entity->Dim.Y, Entity->Type, Entity->ID, Entity->CheckPointParentID);
             
             //Add chunk types
             forN_(Entity->ChunkTypeCount, TypeIndex) {
@@ -764,9 +761,17 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
             MemoryAt +=  PrintS(MemoryAt, GetSize(), "\n");
             
         }
-        
+        ////Writing sound file for note 
+        MemoryAt += PrintS(MemoryAt, GetSize(), "//SOUND_FILE id fileName\n");
+        for(u32 i = 0; i < GameState->EntityCount; ++i) {
+            entity *Entity = GameState->Entities + i;
+            if(Entity->Type == Entity_CheckPoint) {
+                MemoryAt +=  PrintS(MemoryAt, GetSize(), "%d %s\n", Entity->ID, Entity->SoundToPlay);
+                
+            }
+        }
         //// Writing CheckPoints
-        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//CHECKPOINT_PARENTS ID CheckpointIds\n");
+        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//CHECKPOINT_CHILDREN_OF_PARENT ID CheckpointIds\n");
         
         for(u32 i = 0; i < GameState->EntityCount; ++i) {
             entity *Entity = GameState->Entities + i;
@@ -781,26 +786,28 @@ internal b32 SaveLevelToDisk(game_memory *Memory, game_state *GameState, char *F
                 MemoryAt +=  PrintS(MemoryAt, GetSize(), "\n");
             }
         }
+        ///////
         
-        //// Writing CheckPoint References
-        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//CHECKPOINT_PARENT_REFERENCES ID CheckpointParentIds\n");
+        //// Writing CheckPoints
+        MemoryAt +=  PrintS(MemoryAt, GetSize(), "//CHECKPOINT_PARENT_HASHTABLES ID X Y CheckPointParentID\n");
         
         for(u32 i = 0; i < GameState->EntityCount; ++i) {
             entity *Entity = GameState->Entities + i;
-            
-            if(Entity->CheckPointParentCount) {
-                MemoryAt +=  PrintS(MemoryAt, GetSize(), "%d ", Entity->ID);
-                
-                forN_(Entity->CheckPointParentCount, IDIndex) {
-                    MemoryAt +=  PrintS(MemoryAt, GetSize(), "%d ", (u32)Entity->CheckPointParentIds[IDIndex + 1]);
-                    //Add checkpoint parent Ids
-                    //This is an index 0 null pointer array so we plus one... 
+            if(Entity->Type == Entity_Philosopher) {
+                //Add checkpoint entity Ids 
+                for(s32 ChunkIndex = 0; ChunkIndex < ArrayCount(Entity->ParentCheckPointIds); ++ChunkIndex) {
+                    
+                    world_chunk *PhilChunk = Entity->ParentCheckPointIds[ChunkIndex];
+                    
+                    while(PhilChunk) {
+                        
+                        MemoryAt +=  PrintS(MemoryAt, GetSize(), "%d %d %d %d\n", Entity->ID, PhilChunk->X, PhilChunk->Y, (u32)PhilChunk->Type);
+                        PhilChunk = PhilChunk->Next;
+                    }
                 }
-                
-                MemoryAt +=  PrintS(MemoryAt, GetSize(), "\n");
             }
         }
-        ////
+        
         
         u32 MemorySize = GetStringSizeFromChar(MemoryAt, MemoryToWrite);
         Memory->PlatformWriteFile(&Handle, MemoryToWrite, MemorySize, 0);
@@ -832,9 +839,10 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                 enum file_data_type {
                     DATA_NULL, 
                     DATA_CHUNKS, 
-                    DATA_CHECKPOINT_PARENT_IDS, 
-                    DATA_CHECKPOINT_IDS, 
+                    DATA_CHECKPOINT_CHILDREN_OF_PARENT, 
+                    DATA_CHECKPOINT_PARENT_HASHTABLE, 
                     DATA_ENTITIES,
+                    DATA_SOUND_FILE_NAME
                 };
                 
                 file_data_type DataType = DATA_NULL;
@@ -860,23 +868,27 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                             case '/': {
                                 At++;
                                 if(*At == '/') {
+                                    //These are the table names we are creating
                                     char *ChunkID = "CHUNKS";
                                     char *EntitiesID = "ENTITIES";
-                                    char *CheckPointParentID = "CHECKPOINT_PARENTS";
-                                    char *CheckPointParentRefsID = "CHECKPOINT_PARENT_REFERENCES";
-                                    
+                                    char *CheckPointChildrenID = "CHECKPOINT_CHILDREN_OF_PARENT";
+                                    char *CheckPointParentHashTables = "CHECKPOINT_PARENT_HASHTABLES";
+                                    char *SoundFileName = "SOUND_FILE";
                                     At++;
                                     
                                     if(DoStringsMatch(ChunkID, At, StringLength(ChunkID))) {
                                         DataType = DATA_CHUNKS;
-                                    } else if(DoStringsMatch(EntitiesID, At, StringLength(EntitiesID))) {
+                                    }
+                                    if(DoStringsMatch(CheckPointParentHashTables, At, StringLength(CheckPointParentHashTables))) {
+                                        DataType = DATA_CHECKPOINT_PARENT_HASHTABLE;
+                                    }else if(DoStringsMatch(EntitiesID, At, StringLength(EntitiesID))) {
                                         DataType = DATA_ENTITIES;
                                     }
-                                    else if(DoStringsMatch(CheckPointParentRefsID, At, StringLength(CheckPointParentRefsID))) {
-                                        DataType = DATA_CHECKPOINT_PARENT_IDS;
+                                    else if(DoStringsMatch(SoundFileName, At, StringLength(SoundFileName))) {
+                                        DataType = DATA_SOUND_FILE_NAME;
                                     }
-                                    else if(DoStringsMatch(CheckPointParentID, At, StringLength(CheckPointParentID))) {
-                                        DataType = DATA_CHECKPOINT_IDS;
+                                    else if(DoStringsMatch(CheckPointChildrenID, At, StringLength(CheckPointChildrenID))) {
+                                        DataType = DATA_CHECKPOINT_CHILDREN_OF_PARENT;
                                     }
                                     
                                     while(*At != '\n' && *At != '\0') {
@@ -893,6 +905,7 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                                 At++;
                             } break;
                             default: {
+                                value_data *Data = Datas + DataAt++;
                                 if(IsNumeric(*At)) {
                                     char *AtStart = At;
                                     b32 IsFloat = false;
@@ -904,7 +917,7 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                                         At++;
                                     }
                                     s32 Length = (s32)(At - AtStart);
-                                    value_data *Data = Datas + DataAt++;
+                                    
                                     if(IsFloat) {
                                         Data->Type = VALUE_FLOAT;
                                         
@@ -918,6 +931,22 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                                     
                                     Negative = 1;
                                     
+                                } else if(IsAlphaNumeric(*At)) {
+                                    //This is string values. We have to create a buffer here. 
+                                    
+                                    u32 Count = 0;
+                                    char Text[256] = {};
+                                    while(IsAlphaNumeric(*At) || IsNumeric(*At)) {
+                                        Text[Count++] = *At;
+                                        At++;
+                                    }
+                                    Text[Count++] = '\0';
+                                    char *Buffer = PushArray(&GameState->StringArena, char, Count);
+                                    CopyStringToBuffer(Buffer, Count, Text);
+                                    
+                                    Data->Type = VALUE_STRING;
+                                    char** A = (char **)&Data->Value;
+                                    *A = Buffer;
                                 } else {
                                     InvalidCodePath;
                                 }
@@ -934,16 +963,41 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                             case (DATA_CHUNKS): {
                                 Assert(DataAt == 4);
                                 world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, CastAs(s32, Datas[0].Value), CastAs(s32, Datas[1].Value), &GameState->MemoryArena, (chunk_type)CastAs(s32, Datas[3].Value), &GameState->ChunkFreeList);
-                                Chunk->Type = (chunk_type)CastAs(s32, Datas[2].Value);
+                                //Chunk->Type = (chunk_type)CastAs(s32, Datas[2].Value);
+                                
+                            } break;
+                            case(DATA_SOUND_FILE_NAME): {
+                                Assert(DataAt == 2);
+                                u32 EntID = CastAs(u32, Datas[0].Value);char *SoundName = CastAs(char *, Datas[1].Value);
+                                Assert(Datas[1].Type == VALUE_STRING);
+                                entity *Ent = FindEntityFromID(GameState, EntID);
+                                Assert(Ent);
+                                Ent->SoundToPlay = SoundName;
+                            } break;
+                            case(DATA_CHECKPOINT_PARENT_HASHTABLE): {
+                                Assert(DataAt == 4);
+                                
+                                u32 EntID = CastAs(u32, Datas[0].Value);s32 X = CastAs(s32, Datas[1].Value);
+                                s32 Y = CastAs(s32, Datas[2].Value);
+                                u32 ParentID = CastAs(s32, Datas[3].Value);
+                                
+                                entity *Ent = FindEntityFromID(GameState, EntID);
+                                Assert(Ent);
+                                //Maybe we just want to if this to handle deprecated data? Oliver 6/11/17
+                                
+                                GetOrCreateWorldChunk(Ent->ParentCheckPointIds, X, Y, &GameState->MemoryArena, (chunk_type)ParentID, &GameState->ChunkFreeList);
                                 
                             } break;
                             case(DATA_ENTITIES): {
-                                u32 EntityInfoCount = 6;
+                                u32 EntityInfoCount = 7;
                                 Assert(DataAt >= EntityInfoCount);
                                 v2 Pos = V2(CastAs(r32, Datas[0].Value), CastAs(r32, Datas[1].Value));
                                 v2 Dim = V2(CastAs(r32, Datas[2].Value), CastAs(r32, Datas[3].Value));
                                 entity_type Type = (entity_type)CastAs(s32, Datas[4].Value);
                                 u32 ID = CastAs(u32, Datas[5].Value);
+                                //This value is just relevant to the checkpoint children, but saves us having to create another table!
+                                u32 CheckpointParentID = CastAs(u32, Datas[6].Value);
+                                
                                 
                                 Assert(ID > 0);
                                 if(GameState->EntityIDAt <= ID) {
@@ -954,25 +1008,13 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
                                     GameState->RestartPlayerPosition = Pos;
                                 }
                                 
-                                entity *Entity = InitEntity(GameState, Pos, Dim, Type, ID);
+                                entity *Entity = AddEntity(GameState, WorldChunkInMeters*GetGridLocationR32(Pos), Dim, Type, ID);
+                                Entity->CheckPointParentID = CheckpointParentID;
+                                
                                 for(u32 ValueIndex = EntityInfoCount; ValueIndex < DataAt; ++ValueIndex) {AddChunkType(Entity, (chunk_type)CastAs(s32, Datas[ValueIndex].Value));
                                 }
                             } break;
-                            case(DATA_CHECKPOINT_PARENT_IDS): {
-                                u32 EntityInfoCount = 1;
-                                Assert(DataAt >= EntityInfoCount);
-                                
-                                u32 ID = CastAs(u32, Datas[0].Value);
-                                
-                                entity *Entity = FindEntityFromID(GameState, ID);
-                                Assert(Entity->Type == Entity_Philosopher);
-                                for(u32 ValueIndex = EntityInfoCount; ValueIndex < DataAt; ++ValueIndex) {
-                                    AddCheckPointParentIDToEntity(Entity,
-                                                                  CastAs(u32, Datas[ValueIndex].Value));
-                                }
-                                
-                            } break;
-                            case(DATA_CHECKPOINT_IDS): {
+                            case(DATA_CHECKPOINT_CHILDREN_OF_PARENT): {
                                 u32 EntityInfoCount = 1;
                                 Assert(DataAt >= EntityInfoCount);
                                 
@@ -997,14 +1039,14 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
         
     } else {
         GameState->EntityIDAt = 1; //Use null ID as Null reference
-        entity *Player = InitEntity(GameState, V2(-1, -1), V2(WorldChunkInMeters, WorldChunkInMeters), Entity_Player, GameState->EntityIDAt++);
+        entity *Player = AddEntity(GameState, V2(-1, -1), V2(WorldChunkInMeters, WorldChunkInMeters), Entity_Player, GameState->EntityIDAt++);
         
         GameState->RestartPlayerPosition = V2(-1, -1);
         
         AddChunkType(Player, ChunkDark);
         AddChunkType(Player, ChunkLight);
         
-        entity *Camera = InitEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera, GameState->EntityIDAt++);
+        entity *Camera = AddEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera, GameState->EntityIDAt++);
         Camera->Collides = false;
         
         //AddWorldChunks(GameState, 200, 0, 100, ChunkLight);
@@ -1077,7 +1119,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->UIState = PushStruct(&GameState->MemoryArena, ui_state);
         
-        GameState->UIState->TempArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(1));
+        GameState->UIState->TransientTextBoxArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(1));
+        
+        GameState->UIState->StaticTextBoxArena = SubMemoryArena(&GameState->MemoryArena, MegaBytes(1));
         
         /////////////////////////////////
         
@@ -1091,12 +1135,13 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         //"Moonlight_Hall.wav","Faro.wav" podcast1.wav
         GameState->BackgroundMusic = LoadWavFileDEBUG(Memory, "mountain_wind1.wav", 0, 0, &GameState->MemoryArena);
+        GameState->OpenSound = LoadWavFileDEBUG(Memory, "openSound1.wav", 0, 0, &GameState->MemoryArena);
         GameState->BackgroundSoundInstance = PlaySound(&GameState->AudioState, &GameState->BackgroundMusic);
         GameState->BackgroundSoundInstance->Loop = true;
         
-        GameState->PushSound[0] = LoadWavFileDEBUG(Memory, "CNOtes1.wav", 0, 0, &GameState->MemoryArena);
+        GameState->PushSound[GameState->PushSoundCount++] = LoadWavFileDEBUG(Memory, "CNOtes1.wav", 0, 0, &GameState->MemoryArena);
         
-        GameState->PushSound[1] = LoadWavFileDEBUG(Memory, "GNOtes1.wav", 0, 0, &GameState->MemoryArena);
+        GameState->PushSound[GameState->PushSoundCount++] = LoadWavFileDEBUG(Memory, "GNOtes1.wav", 0, 0, &GameState->MemoryArena);
         
 #if 0
         //PushSound(GameState, &GameState->BackgroundMusic, 1.0, false);
@@ -1130,7 +1175,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->Door = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.05f));
         
-        GameState->Monster = LoadBitmap(Memory, 0, "monster1.bmp");
+        GameState->Monster = LoadBitmap(Memory, 0, "flowers/flower.bmp");
         
         //background_sun
         GameState->BackgroundImage = LoadImage(Memory, &GameState->MemoryArena, "sky_background.png", V2(0.5f, 0.5f));
@@ -1286,9 +1331,36 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             UISet.Type = UISet.Name = "Save Level";
             AddUIElement(GameState->UIState, UI_Button, UISet);
             
+            UISet.Type = UISet.Name = "Clear Introspect Window";
+            AddUIElement(GameState->UIState, UI_Button, UISet);
+            
             UISet.ValueLinkedToPtr = &GameState->RenderMainChunkType;
             UISet.Name = "Render Main Chunk Type";
             AddUIElement(GameState->UIState, UI_CheckBox, UISet);
+        }
+        PopUIElement(GameState->UIState);
+        
+        UISet = {};
+        UISet.Pos = V2(0.4f*(r32)Buffer->Width, 20);
+        UISet.Name = 0;
+        
+        
+        PushUIElement(GameState->UIState, UI_Moveable,  UISet);
+        {
+            memory_arena *StaticArena = &GameState->UIState->StaticTextBoxArena;
+            InitCharBuffer(&UISet.Buffer, 256, StaticArena, StaticArena);
+            UISet.Type = "u32";
+            UISet.ValueLinkedToPtr = &GameState->UIState->PhilosopherID;
+            UISet.Name = "Philosopher ID:  ";
+            
+            AddUIElement(GameState->UIState, UI_TextBox, UISet);
+            
+            InitCharBuffer(&UISet.Buffer, 256, StaticArena, StaticArena);
+            UISet.Type = "u32";
+            UISet.ValueLinkedToPtr = &GameState->UIState->CheckPointParentID;
+            UISet.Name = "Check Point Parent ID:  ";
+            
+            AddUIElement(GameState->UIState, UI_TextBox, UISet);
         }
         PopUIElement(GameState->UIState);
         
@@ -1296,10 +1368,18 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         UISet= {};
         UISet.Pos = V2(0, 20);
         
+        SetEditorMode(GameState->UIState, SELECT_MODE);
+        
+        SetEntityTypeMode(GameState->UIState, Entity_Block);
+        
         PushUIElement(GameState->UIState, UI_Moveable,  UISet);
         {
+            UISet.Active = true;
             u32 DropDownBoxParentIndex = PushUIElement(GameState->UIState, UI_DropDownBoxParent, UISet);
             ui_element *Elm =GameState->UIState->Elements + DropDownBoxParentIndex;
+            Elm->Set.ValueLinkedToPtr = &GameState->UIState->InitInfo;
+            Elm->Set.EnumArray.Array = entity_type_Names;
+            
             UISet.ValueLinkedToPtr = &Elm->Set.ScrollAt;
             AddUIElement(GameState->UIState, UI_Slider, UISet);
             {
@@ -1323,6 +1403,28 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     AddUIElement(GameState->UIState, UI_DropDownBox, UISet);
                 }
                 
+            }
+            PopUIElement(GameState->UIState);
+            
+            DropDownBoxParentIndex = PushUIElement(GameState->UIState, UI_DropDownBoxParent, UISet);
+            {
+                Elm = GameState->UIState->Elements + DropDownBoxParentIndex;
+                Elm->Set.ValueLinkedToPtr = &GameState->UIState->EditorMode;
+                Elm->Set.EnumArray.Array = editor_mode_Names;
+                
+                UISet.ValueLinkedToPtr = &Elm->Set.ScrollAt;
+                AddUIElement(GameState->UIState, UI_Slider, UISet);
+                {
+                    for(u32 TypeI = 0; TypeI < ArrayCount(editor_mode_Values); ++TypeI) {
+                        UISet.Name = editor_mode_Names[TypeI];
+                        UISet.EnumArray.Array = editor_mode_Values;
+                        UISet.EnumArray.Index = TypeI;
+                        UISet.EnumArray.Type = editor_mode_Names[ArrayCount(editor_mode_Names) - 1];
+                        UISet.ValueLinkedToPtr = &GameState->UIState->EditorMode;
+                        
+                        AddUIElement(GameState->UIState, UI_DropDownBox, UISet);
+                    }
+                }
             }
             PopUIElement(GameState->UIState);
             
@@ -1506,6 +1608,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             case 8: { //Backspace
                                 Splice_("", &DebugConsole.Input, -1);
                             } break;
+                            case 13: { //Enter
+                                //Don't do anything
+                            } break;
                             default: {
                                 AddToInBuffer("%s", &KeyIndex);
                             }
@@ -1544,6 +1649,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             case 8: { //Backspace
                                 Splice_("", ElmBuffer, -1);
                             } break;
+                            case 13: { //Enter
+                                //Don't do anything
+                            } break;
                             default: {
                                 AddToBufferGeneral(ElmBuffer, "%s", &KeyIndex);
                             }
@@ -1555,11 +1663,26 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                 if(WasPressed(Memory->GameButtons[Button_Enter])) {
                     //Finished with editing the box
                     //We have to now parse the data here!
-                    //  Next time on mind man! 
-                    //
+                    
+                    if(DoStringsMatch(Elm->Set.Type, "u32") || 
+                       DoStringsMatch(Elm->Set.Type, "s32")) {
+                        s32 Value = StringToInteger(ElmBuffer->Chars, ElmBuffer->IndexAt);
+                        *((s32 *)Elm->Set.ValueLinkedToPtr) = Value;
+                    } else if(DoStringsMatch(Elm->Set.Type, "r32")) {
+                        r32 Value = StringToFloat(ElmBuffer->Chars, ElmBuffer->IndexAt);
+                        *((r32 *)Elm->Set.ValueLinkedToPtr) = Value;
+                    } else if(DoStringsMatch(Elm->Set.Type, "char *")) {
+                        //This is a memory leak since we never clear the unused text buffers. We need more of a dynamic memory allocator. 
+                        char *TextBuffer = PushArray(&GameState->StringArena, char, ElmBuffer->IndexAt);
+                        CopyStringToBuffer(TextBuffer, ElmBuffer->IndexAt, ElmBuffer->Chars);
+                        *((char **)Elm->Set.ValueLinkedToPtr) = TextBuffer;
+                    } else {
+                        AddToOutBuffer("Type not recognized.");
+                    }
+                    
+                    
                     ClearBuffer(ElmBuffer);
                     UIState->InteractingWith = 0;
-                    EmptyMemoryArena(&UIState->TempArena);
                 }
                 
             } else {
@@ -1594,7 +1717,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                 {
                     if(GameState->PlayerIsSettingPath) {
                         PlayerGridP = GetGridLocation(Player->Pos);
-                        entity *Entity = InitEntity(GameState, V2i(PlayerGridP), V2(1, 1), Entity_Dropper, GameState->EntityIDAt++);
+                        entity *Entity = AddEntity(GameState, V2i(PlayerGridP), V2(1, 1), Entity_Dropper, GameState->EntityIDAt++);
                         AddChunkType(Entity, ChunkLight);
                         AddChunkType(Entity, ChunkDark);
                         Entity->VectorIndexAt = 1;
@@ -1659,15 +1782,15 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     v2i GridTargetPos = (PlayerGridP + PlayerMove);
                     world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, GridTargetPos.X, GridTargetPos.Y, 0, ChunkNull);
                     
-                    // NOTE(OLIVER): This is where the player moves the block...
-                    if(Chunk && Chunk->Type == ChunkBlock) {
+                    // NOTE(OLIVER): This is where the player moves the block.
+                    entity *Block = GetEntity(GameState, WorldChunkInMeters*V2i(GridTargetPos), Entity_Block);
+                    if(Chunk && Block) {
                         v2i BlockTargetPos = GridTargetPos + PlayerMove;
                         world_chunk *NextChunk = GetOrCreateWorldChunk(GameState->Chunks, BlockTargetPos.X, BlockTargetPos.Y, 0, ChunkNull);
-                        entity *Block = GetEntity(GameState, WorldChunkInMeters*V2i(GridTargetPos), Entity_Block);
+                        
                         Assert(Block && Block->Type == Entity_Block);
-                        if(NextChunk && IsValidType(NextChunk, Block->ValidChunkTypes, Block->ChunkTypeCount) && !GetEntity(GameState, V2i(BlockTargetPos), Entity_Philosopher, true) && !GetEntity(GameState, V2i(BlockTargetPos), Entity_Block, true)) {
-                            Chunk->Type = Chunk->MainType;
-                            NextChunk->Type = ChunkBlock;
+                        if(NextChunk && IsValidType(NextChunk, Block->ValidChunkTypes, Block->ChunkTypeCount) && NextChunk->Type != ChunkEntity) {
+                            
                             Assert(Chunk != NextChunk);
                             InitializeMove(GameState, Block, WorldChunkInMeters*V2i(BlockTargetPos));
                             if(PlayerMove.X != 0) {
@@ -1703,6 +1826,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             
             v2 CamPos = Camera->Pos;
             
+            ui_state *UIState = GameState->UIState;
 #define DRAW_GRID 1
             
 #if DRAW_GRID
@@ -1745,7 +1869,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 Color01 = {0.8f, 0.8f, 0.6f, 1};
                                 Bitmap = &GameState->Desert;
                             } break;
-                            case ChunkBlock: {
+                            case ChunkEntity: {
                                 Color01 = {0.7f, 0.3f, 0, 1};
                             } break;
                             case ChunkNull: {
@@ -1756,13 +1880,28 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             }
                         }
                         
+                        b32 DrawPhilosopherCheckPointChunk = false;
+                        if(GameState->ShowHUD) {
+                            if(UIState->EntIntrospecting && UIState->EntIntrospecting->Type == Entity_Philosopher) {
+                                entity *Phil = UIState->EntIntrospecting;
+                                world_chunk *PhilChunk = GetOrCreateWorldChunk(Phil->ParentCheckPointIds, GridP.X, GridP.Y, 0, ChunkNull);
+                                if(PhilChunk) {
+                                    DrawPhilosopherCheckPointChunk = true;
+                                }
+                                
+                            }
+                        }
+                        
 #if DRAW_PLAYER_PATH
                         if(IsPartOfPath(Chunk->X, Chunk->Y, &Player->Path)) {
                             Color01 = {1, 0, 1, 1};
                             PushRect(RenderGroup, Rect, 1, Color01);
                         } else 
 #endif
-                        {
+                        if(DrawPhilosopherCheckPointChunk) {
+                            Color01 = {1, 0, 1, 1};
+                            PushRect(RenderGroup, Rect, 1, Color01);
+                        } else {
                             if(Bitmap) {
                                 PushBitmap(RenderGroup, V3(MinX, MinY, 1), Bitmap, WorldChunkInMeters, BufferRect);
                             } else {
@@ -1773,28 +1912,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                 }
             }
 #endif
-            /*
-            entity *Philosopher = FindFirstEntityOfType(GameState, Entity_Philosopher);
-            for(u32 i = 0; i < GameState->CheckPointCount; i++) {
-                check_point_parent *Parent = GameState->CheckPointParents + i;
-                
-                for(u32 j = 0; j < Parent->Count; j++) {
-                    v4 Color = V4(0, 1, 0, 1);
-                    if(Philosopher->CheckPointParentAt == i) {
-                        if(j == Philosopher->CheckPointAt) {
-                            Color= V4(1, 0, 0, 1);
-                        } else {
-                            Color= V4(1, 0, 1, 1);
-                        }
-                    }
-                    check_point *CheckPoint = Parent->CheckPoints + j;
-                    v2 RelPos = WorldChunkInMeters*V2i(CheckPoint->Pos) - CamPos;
-                    rect2 CheckPointRect = Rect2CenterDim(RelPos, V2(0.4f, 0.4f));
-                    PushRect(RenderGroup, CheckPointRect, 1, Color);
-                    
-                }
-            }*/
-            
             r32 PercentOfScreen = 0.1f;
             v2 CameraWindow = (1.0f/MetersToPixels)*PercentOfScreen*V2i(Buffer->Width, Buffer->Height);
             //NOTE(): Draw Camera bounds that the player stays within. 
@@ -1817,8 +1934,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             if(!GameState->UIState->GamePaused) {
                                 /////////NOTE(Oliver): Update Player's postion/////////////// 
                                 
-                                b32 DidMove = UpdateEntityPositionViaFunction(GameState, Entity, dt);
-                                if(DidMove) {
+                                UpdateEntityPositionViaFunction(GameState, Entity, dt);
+                                if(Entity->WentToNewMove) {
                                     PlaySound(&GameState->AudioState, &GameState->FootstepsSound[Entity->WalkSoundAt++]);
                                     if(Entity->WalkSoundAt >= 2) {
                                         Entity->WalkSoundAt = 0;
@@ -1831,83 +1948,113 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 } else {
                                     Camera->AccelFromLastFrame = V2(0, 0);
                                 }
-                                /////// NOTE(OLIVER): Player Animation
-                                if(!IsEmpty(&Entity->AnimationListSentintel)) {
-                                    
-                                    PushCurrentAnimationBitmap(RenderGroup, Entity, EntityRelP, BufferRect, 1.7f);
-                                    
-                                    //// NOTE(OLIVER): Preparing to look for new animation State
-                                    
-                                    animation *NewAnimation = 0;
-                                    r32 DirectionValue = GetDirectionInRadians(Entity);
-                                    
+                            }
+                            /////// NOTE(OLIVER): Player Animation
+                            if(!IsEmpty(&Entity->AnimationListSentintel)) {
+                                
+                                PushCurrentAnimationBitmap(RenderGroup, Entity, EntityRelP, BufferRect, 1.7f);
+                                
+                                //// NOTE(OLIVER): Preparing to look for new animation State
+                                
+                                animation *NewAnimation = 0;
+                                r32 DirectionValue = GetDirectionInRadians(Entity);
+                                
 #define USE_ANIMATION_STATES 0
 #if USE_ANIMATION_STATES
-                                    r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
-                                    r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f};
-                                    
-                                    Qualities[DIRECTION] = DirectionValue; 
-                                    
-                                    NewAnimation = GetAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, Qualities, Weights);
+                                r32 Qualities[ANIMATE_QUALITY_COUNT] = {};
+                                r32 Weights[ANIMATE_QUALITY_COUNT] = {1.0f};
+                                
+                                Qualities[DIRECTION] = DirectionValue; 
+                                
+                                NewAnimation = GetAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, Qualities, Weights);
 #else 
-                                    char *AnimationName = 0;
-                                    r32 Speed = Length(Entity->Velocity);
-                                    if(Speed < 1.0f) {
-                                        AnimationName = "Knight_Idle";
-                                    } else {
-                                        if (DirectionValue == 0) {
-                                            AnimationName = "Knight_Run_Right";
-                                        } 
-                                        else if (DirectionValue == 0.25f*TAU32) {
-                                            AnimationName = "Knight_Run_Up";
-                                        } 
-                                        else if (DirectionValue == 0.5f*TAU32) {
-                                            AnimationName = "Knight_Run_Left";
-                                        } 
-                                        else if (DirectionValue == 0.75f*TAU32) {
-                                            AnimationName = "Knight_Run_Down";
-                                        } 
-                                    }
-                                    
-                                    NewAnimation = FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, AnimationName);
-#endif
-                                    
-                                    Assert(NewAnimation);
-                                    UpdateAnimation(GameState, Entity, dt, NewAnimation);
-                                    ///
+                                char *AnimationName = 0;
+                                r32 Speed = Length(Entity->Velocity);
+                                if(Speed < 1.0f) {
+                                    AnimationName = "Knight_Idle";
                                 } else {
-                                    
-                                    PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
+                                    if (DirectionValue == 0) {
+                                        AnimationName = "Knight_Run_Right";
+                                    } 
+                                    else if (DirectionValue == 0.25f*TAU32) {
+                                        AnimationName = "Knight_Run_Up";
+                                    } 
+                                    else if (DirectionValue == 0.5f*TAU32) {
+                                        AnimationName = "Knight_Run_Left";
+                                    } 
+                                    else if (DirectionValue == 0.75f*TAU32) {
+                                        AnimationName = "Knight_Run_Down";
+                                    } 
                                 }
+                                
+                                NewAnimation = FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, AnimationName);
+#endif
+                                
+                                Assert(NewAnimation);
+                                UpdateAnimation(GameState, Entity, dt, NewAnimation);
+                                ///
+                            } else {
+                                
+                                PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
                             }
                             
                             ///////
                         } break;
-                        case Entity_Door: {
-                            v2i EntityPos = GetGridLocation(Entity->Pos);
-                            GetOrCreateWorldChunk(GameState->Chunks, EntityPos.X, EntityPos.Y, 0, ChunkNull);
+                        case Entity_Note: {
                             
-                            
-                            
-                            //PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
-                            
-                            PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Door,  1.1f*WorldChunkInMeters, BufferRect);
+                            //PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Door,  1.1f*WorldChunkInMeters, BufferRect);
                             
                         } break;
                         case Entity_CheckPoint: {
-                            PushRect(RenderGroup, EntityAsRect, 1, V4(1, 0, 0, 1));
+                            entity *Philospher = GetEntity(GameState, Entity->Pos, Entity_Philosopher);
                             
-                            entity *Phil = FindFirstEntityOfType(GameState, Entity_Philosopher);
-                            
-                            /*if(Entity->LastSearchPos == GetGridLocation(Phil->Pos)) {
-                                if(Entity->SoundToPlay) {
-                                    PlaySound(&GameState->AudioState, Entity->SoundToPlay);
+                            entity *LastFrameEntity = FindEntityFromID(GameState, Entity->LastFrameEntityID);
+                            if(Philospher && Philospher != LastFrameEntity) {
+                                
+                                Reactivate(&Entity->ParticleSystem);
+                                
+                                
+                                loaded_sound *Sound = FindSound(GameState, Entity->SoundToPlay);
+                                if(Sound) {
+                                    PlaySound(&GameState->AudioState, Sound);
                                 }
-                            }*/
+                                entity *Parent = FindEntityFromID(GameState, Entity->CheckPointParentID);
+                                
+                                b32 AllComplete = true;
+                                for(u32 i = 0 ; i < Parent->CheckPointCount; ++i) {
+                                    if(Parent->CheckPointIds[i] == Entity->ID) {
+                                        Parent->CheckPointComplete[i] = true;
+                                    }
+                                    AllComplete &= Parent->CheckPointComplete[i];
+                                    
+                                }
+                                
+                                if(AllComplete && !Parent->IsOpen) {
+                                    Parent->IsOpen = true;
+                                    v2i ParentPos = GetGridLocation(Parent->Pos);
+                                    world_chunk *ParentChunk = GetOrCreateWorldChunk(GameState->Chunks, ParentPos.X, ParentPos.Y, 0, ChunkNull);
+                                    ParentChunk->Type = ParentChunk->MainType;
+                                    PlaySound(&GameState->AudioState, &GameState->OpenSound);
+                                    
+                                }
+                            }
+                            
+                            Entity->LastFrameEntityID = (Philospher) ? Philospher->ID : 0;
+                            
+                            PushRect(RenderGroup, EntityAsRect, 1, V4(0, 1, 1, 1));
+                            
+                            DrawParticleSystem(&Entity->ParticleSystem, RenderGroup, dt, Entity->Pos, V3(0, 1, 0), CamPos);
                             
                         } break;
                         case Entity_CheckPointParent: {
-                            PushRect(RenderGroup, EntityAsRect, 1, V4(1, 1, 0, 1));
+                            if(Entity->IsOpen) {
+                                if(GameState->ShowHUD) {
+                                    PushRect(RenderGroup, EntityAsRect, 1, V4(1, 1, 0, 1));
+                                }
+                            } else { 
+                                PushBitmap(RenderGroup, V3(EntityRelP, 1), &GameState->Door,  0.8f*WorldChunkInMeters, BufferRect);
+                            }
+                            
                             
                         } break;
                         case Entity_Philosopher: {
@@ -1923,13 +2070,13 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 //Case where the chunk changes to a new type, so search isn't valid anymore -> Maybe go to last valid position...
                                 // TODO(Oliver): Maybe we could fix this during the move. If the chunk suddenly changes to an invalid chunk, we will try backtrace or go to the nearest valid chunk type. 
                                 
-                                b32 CanSeePlayer = ContainsChunkType(Entity, PlayerChunk->Type);
+                                b32 CanSeePlayer = ContainsChunkType(Entity, PlayerChunk->MainType);
                                 
                                 if(LookingForPosition(Entity, PlayerPos) && !CanSeePlayer) {
                                     EndPath(Entity);
                                 }
                                 
-                                if(Entity->LastSearchPos != PlayerPos && CanSeePlayer && Entity->IsAtEndOfMove) {
+                                if(Entity->LastSearchPos != PlayerPos && CanSeePlayer && Entity->WentToNewMove) {
                                     v2 TargetPos_r32 = WorldChunkInMeters*V2i(PlayerPos);
                                     
                                     WasSuccessful = InitializeMove(GameState, Entity, TargetPos_r32);
@@ -1953,7 +2100,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                             
                                             v2 TargetPos_r32 = WorldChunkInMeters*GetGridLocationR32(CurrentCheckPoint->Pos);
                                             
-                                            b32 SuccessfulMove = InitializeMove(GameState, Entity, TargetPos_r32, false, CurrentCheckPoint->SoundToPlay);
+                                            b32 SuccessfulMove = InitializeMove(GameState, Entity, TargetPos_r32, false);
                                             Assert(SuccessfulMove);
                                             
                                             Entity->CheckPointAt++;
@@ -1962,46 +2109,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                             }
                                         }
                                     }
-#define RANDOM_WALK 0
-#if RANDOM_WALK
                                     
-                                    random_series *RandGenerator = &GameState->GeneralEntropy;
-                                    
-                                    s32 PossibleStates[] = {-1, 0, 1};
-                                    v2i Dir = {};
-                                    for(;;) {
-                                        b32 InArray = false;
-                                        fori(Entity->LastMoves) {
-                                            if(Dir == Entity->LastMoves[Index]) {
-                                                InArray = true;
-                                                break;
-                                            }
-                                        }
-                                        if(InArray) {
-                                            s32 Axis = RandomBetween(RandGenerator, 0, 1);
-                                            if(Axis) {
-                                                Dir.X = RandomBetween(RandGenerator, -1, 1);
-                                                Dir.Y = 0;
-                                                
-                                            } else {
-                                                Dir.X = 0;
-                                                Dir.Y = RandomBetween(RandGenerator, -1, 1);
-                                            }
-                                            
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    Entity->LastMoves[Entity->LastMoveAt++] = V2int(-Dir.X,-Dir.Y);
-                                    if(Entity->LastMoveAt >= ArrayCount(Entity->LastMoves)) { Entity->LastMoveAt = 0;}
-                                    
-                                    v2 TargetPos_r32 = WorldChunkInMeters*V2i(GetGridLocation(Entity->Pos) + Dir);
-                                    b32 SuccessfulMove = InitializeMove(GameState, Entity, TargetPos_r32);
-                                    Assert(SuccessfulMove);
-#endif //Random walk 
                                     
                                 }
-                                
                                 UpdateEntityPositionViaFunction(GameState, Entity, dt);
                                 if(GetGridLocation(Entity->Pos) == GetGridLocation(Player->Pos)) {
                                     GameState->GameMode = GAMEOVER_MODE;
@@ -2075,9 +2185,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                             
                         } break;
                         case Entity_Dropper: {
-                            b32 Moved = UpdateEntityPositionViaFunction(GameState, Entity, dt);
-                            if(Moved) {
-                                entity* Changer = InitEntity(GameState, Entity->Pos, WorldChunkInMeters*V2(0.5f, 0.5f), Entity_Chunk_Changer, GameState->EntityIDAt++);
+                            UpdateEntityPositionViaFunction(GameState, Entity, dt);
+                            if(Entity->WentToNewMove) {
+                                entity* Changer = AddEntity(GameState, Entity->Pos, WorldChunkInMeters*V2(0.5f, 0.5f), Entity_Chunk_Changer, GameState->EntityIDAt++);
                                 AddChunkTypeToChunkChanger(Changer, ChunkLight);
                                 AddChunkTypeToChunkChanger(Changer, ChunkDark);
                                 
@@ -2147,7 +2257,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
             
             //////////////UI Update And Rendering////////////////
             if(GameState->ShowHUD) {
-                ui_state *UIState = GameState->UIState;
                 
                 ui_loop_info UIInfo = InitUILoopInfo();
                 ui_element *NextHotEntity = 0;
@@ -2160,133 +2269,149 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                         Assert(UIInfo.LastElmCount == 0);
                         UIInfo.StartP = UIInfo.PosAt = Element->Set.Pos;
                         
-                        rect2 ClipRect = Rect2MinDim(UIInfo.StartP, V2(UIInfo.MenuWidth, UIInfo.StartP.Y + MAX_S32));
-                        b32 DrawBacking = true;
-                        
-                        PushOntoLastElms(&UIInfo, Element);
-                        
-                        for(;;) {
-                            GetLatestElm(&UIInfo);
+                        //Assert(Element->Type == UI_Parent);
+                        if(Element->Type == UI_Parent) {
+                            rect2 ClipRect = Rect2MinDim(UIInfo.StartP, V2(UIInfo.MenuWidth, UIInfo.StartP.Y + MAX_S32));
+                            b32 DrawBacking = true;
                             
-                            for(UIInfo.ChildAt = UIInfo.ParentElm->TempChildrenCount;
-                                UIInfo.ChildAt <  UIInfo.ParentElm->ChildrenCount; 
-                                ) {
-                                
-                                BeginUIElmsLoop(&UIInfo, GameState->UIState, UI_CHILD_LOOP);
-                                
-                                ////////Drawing the ui Element//////
-                                r32 MenuHeight = 300;
-                                v2 TempPosAt = {};
-                                
-                                rect2 ElementAsRect = {};
-                                switch(UIInfo.ChildElm->Type) {
-                                    case UI_Moveable:{
-                                        v2 Dim = V2(UIInfo.MenuWidth, (r32)GameState->DebugFont->LineAdvance);
-                                        ElementAsRect = Rect2MinDim(V2(UIInfo.PosAt.X, UIInfo.PosAt.Y), Dim);
-                                        PushRectOutline(OrthoRenderGroup, ElementAsRect, 1, V4(0.5f, 1, 0, 1)); 
-                                        UIInfo.PosAt.Y += GetHeight(ElementAsRect);
-                                        UIInfo.ChildElm->Set.Dim = Dim;
-                                    } break;
-                                    case UI_DropDownBoxParent: {
-                                        if(UIInfo.ChildElm->Set.Active) {
-                                            if(UIInfo.ChildElm->ChildrenCount) {
-                                                
-                                                DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
-                                                
-                                            }
-                                        } 
-                                    } break;
-                                    case UI_DropDownBox: {
-                                        Assert(UIInfo.ParentElm->Type == UI_DropDownBoxParent);
-                                        if(!UIInfo.ParentElm->Set.Active) { //This is the parent
-                                            rect2 MenuClipRect = ClipLeftX(UIInfo.PosAt, ClipRect);
-                                            MenuClipRect.Max.Y = (ClipRect.Min.Y + MenuHeight);
-                                            
-                                            //This needs the stencil buffer to clip the rect space. 
-                                            b32 DrawMenuItem = true;
-                                            b32 DisplayMenuItem = true;
-                                            if(UIInfo.PosAt.Y < TempPosAt.Y) {
-                                                DisplayMenuItem = false;
-                                            }
-                                            if(UIInfo.PosAt.Y > MenuClipRect.Max.Y) {
-                                                DrawMenuItem = false;
-                                            }
-                                            //
-                                            if(DrawMenuItem) {
-                                                DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, MenuClipRect, UIState->InteractingWith,  DisplayMenuItem);
-                                            }
-                                        } 
-                                        
-                                    } break;
-                                    case UI_CheckBox: {
-                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
-                                    } break;
-                                    case UI_TextBox: {
-                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
-                                    } break;
-                                    case UI_Slider: {
-                                        if(!UIInfo.ParentElm->Set.Active) {
-                                            rect2 OutlineDim = Rect2MinDim(UIInfo.PosAt - V2(UIInfo.IndentSpace, 0), V2(UIInfo.IndentSpace, MenuHeight));
-                                            PushRectOutline(OrthoRenderGroup, OutlineDim, 1, V4(0, 0, 0, 1));
-                                            v2 ScrollPos = {};
-                                            r32 ScrollAt01 = *((r32 *)UIInfo.ChildElm->Set.ValueLinkedToPtr);
-                                            ScrollPos.Y = ScrollAt01;
-                                            ScrollPos.Y = Lerp(UIInfo.ChildElm->Set.Min, ScrollPos.Y, UIInfo.ChildElm->Set.Max);
-                                            ScrollPos.X = UIInfo.PosAt.X - UIInfo.IndentSpace;
-                                            
-                                            rect2 HandleDim = Rect2CenterDim(ScrollPos, V2(UIInfo.IndentSpace, UIInfo.IndentSpace));
-                                            HandleDim.Min.X += 0.5f*UIInfo.IndentSpace;
-                                            HandleDim.Max.X += 0.5f*UIInfo.IndentSpace;
-                                            v4 Color = V4(1, 1, 1, 1);
-                                            PushRect(OrthoRenderGroup, HandleDim, 1, Color);
-                                            ElementAsRect = HandleDim;
-                                            UIInfo.ChildElm->Set.Min = OutlineDim.Min.Y;
-                                            UIInfo.ChildElm->Set.Max = OutlineDim.Max.Y;
-                                            
-                                            TempPosAt = UIInfo.PosAt;
-                                            UIInfo.PosAt.Y -= MenuHeight*ScrollAt01;
-                                        }
-                                        
-                                    } break;
-                                    case UI_Button: {
-                                        DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
-                                    } break;
-                                    case UI_Entity: {
-                                        //Already Rendered Above
-                                        u32 ID = CastVoidAs(u32, UIInfo.ChildElm->Set.ValueLinkedToPtr);
-                                        entity *Entity = FindEntityFromID(GameState, ID);
-                                        v2 EntityRelP = Entity->Pos - CamPos;
-                                        
-                                        ElementAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
-                                        if(InBounds(ElementAsRect, MouseP_PerspectiveSpace)) {
-                                            NextHotEntity = UIInfo.ChildElm;
-                                            //AddToOutBuffer("Is Hot!\n");
-                                        }
-                                        DrawBacking = false;
-                                        
-                                    } break;
-                                }
-                                
-                                
-                                UIInfo.ChildElm->Set.Pos = ElementAsRect.Min;
-                                UIInfo.ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
-                                
-                                if(InBounds(ElementAsRect, MouseP_OrthoSpace)) {
-                                    NextHotEntity = UIInfo.ChildElm;
-                                }
-                                ///////Finished Drawing UI ELEMENT ///////
-                                EndUIElmsLoop(&UIInfo, UI_CHILD_LOOP);
-                                
-                            }
-                            if(EndUIElmsLoop(&UIInfo, UI_OUTER_LOOP)) {
-                                break;
-                            }
-                        }
-                        
-                        if(DrawBacking) {
+                            /*
                             rect2 BackingRect = ClipRect;
-                            BackingRect.Max.Y = UIInfo.PosAt.Y;
-                            //PushRect(OrthoRenderGroup, BackingRect, 1, V4(0.2f, 0.2f, 0.2f, 0.5f));
+                            BackingRect.Max.Y = 500;
+                            PushRect(OrthoRenderGroup, BackingRect, 1, V4(0.2f, 0.2f, 0.2f, 0.5f));
+                            */
+                            PushOntoLastElms(&UIInfo, Element);
+                            
+                            for(;;) {
+                                GetLatestElm(&UIInfo);
+                                
+                                for(UIInfo.ChildAt = UIInfo.ParentElm->TempChildrenCount;
+                                    UIInfo.ChildAt <  UIInfo.ParentElm->ChildrenCount; 
+                                    ) {
+                                    
+                                    BeginUIElmsLoop(&UIInfo, GameState->UIState, UI_CHILD_LOOP);
+                                    
+                                    ////////Drawing the ui Element//////
+                                    r32 MenuHeight = 500;
+                                    v2 TempPosAt = {};
+                                    
+                                    rect2 ElementAsRect = {};
+                                    switch(UIInfo.ChildElm->Type) {
+                                        case UI_Moveable:{
+                                            v2 Dim = V2(UIInfo.MenuWidth, (r32)GameState->DebugFont->LineAdvance);
+                                            ElementAsRect = Rect2MinDim(V2(UIInfo.PosAt.X, UIInfo.PosAt.Y), Dim);
+                                            PushRectOutline(OrthoRenderGroup, ElementAsRect, 1, V4(0.5f, 1, 0, 1)); 
+                                            UIInfo.PosAt.Y += GetHeight(ElementAsRect);
+                                            UIInfo.ChildElm->Set.Dim = Dim;
+                                            
+                                            if(!UIInfo.ChildElm->Set.Active) {
+                                                UIInfo.LookAtChildren = false;
+                                            }
+                                        } break;
+                                        case UI_DropDownBoxParent: {
+                                            enum_array_data *Data =(enum_array_data *)UIInfo.ChildElm->Set.ValueLinkedToPtr;
+                                            
+                                            char **NameArray = (char **)UIInfo.ChildElm->Set.EnumArray.Array;
+                                            UIInfo.ChildElm->Set.Name = NameArray[Data->Index];
+                                            if(UIInfo.ChildElm->Set.Active) {
+                                                if(UIInfo.ChildElm->ChildrenCount) {
+                                                    
+                                                    DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
+                                                    
+                                                }
+                                            } 
+                                        } break;
+                                        case UI_DropDownBox: {
+                                            Assert(UIInfo.ParentElm->Type == UI_DropDownBoxParent);
+                                            if(!UIInfo.ParentElm->Set.Active) { //This is the parent
+                                                rect2 MenuClipRect = ClipLeftX(UIInfo.PosAt, ClipRect);
+                                                MenuClipRect.Max.Y = (ClipRect.Min.Y + MenuHeight);
+                                                
+                                                //This needs the stencil buffer to clip the rect space. 
+                                                b32 DrawMenuItem = true;
+                                                b32 DisplayMenuItem = true;
+                                                if(UIInfo.PosAt.Y < TempPosAt.Y) {
+                                                    DisplayMenuItem = false;
+                                                }
+                                                if(UIInfo.PosAt.Y > MenuClipRect.Max.Y) {
+                                                    DrawMenuItem = false;
+                                                }
+                                                //
+                                                if(DrawMenuItem) {
+                                                    DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, MenuClipRect, UIState->InteractingWith,  DisplayMenuItem);
+                                                }
+                                            } 
+                                            
+                                        } break;
+                                        case UI_CheckBox: {
+                                            DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
+                                        } break;
+                                        case UI_TextBox: {
+                                            DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
+                                        } break;
+                                        case UI_Slider: {
+                                            if(!UIInfo.ParentElm->Set.Active) {
+                                                rect2 OutlineDim = Rect2MinDim(UIInfo.PosAt - V2(UIInfo.IndentSpace, 0), V2(UIInfo.IndentSpace, MenuHeight));
+                                                PushRectOutline(OrthoRenderGroup, OutlineDim, 1, V4(0, 0, 0, 1));
+                                                v2 ScrollPos = {};
+                                                r32 ScrollAt01 = *((r32 *)UIInfo.ChildElm->Set.ValueLinkedToPtr);
+                                                ScrollPos.Y = ScrollAt01;
+                                                ScrollPos.Y = Lerp(UIInfo.ChildElm->Set.Min, ScrollPos.Y, UIInfo.ChildElm->Set.Max);
+                                                ScrollPos.X = UIInfo.PosAt.X - UIInfo.IndentSpace;
+                                                
+                                                rect2 HandleDim = Rect2CenterDim(ScrollPos, V2(UIInfo.IndentSpace, UIInfo.IndentSpace));
+                                                HandleDim.Min.X += 0.5f*UIInfo.IndentSpace;
+                                                HandleDim.Max.X += 0.5f*UIInfo.IndentSpace;
+                                                v4 Color = V4(1, 1, 1, 1);
+                                                PushRect(OrthoRenderGroup, HandleDim, 1, Color);
+                                                ElementAsRect = HandleDim;
+                                                UIInfo.ChildElm->Set.Min = OutlineDim.Min.Y;
+                                                UIInfo.ChildElm->Set.Max = OutlineDim.Max.Y;
+                                                
+                                                TempPosAt = UIInfo.PosAt;
+                                                UIInfo.PosAt.Y -= MenuHeight*ScrollAt01;
+                                            }
+                                            
+                                        } break;
+                                        case UI_Button: {
+                                            DrawMenuItemWithText(UIInfo.ChildElm, OrthoRenderGroup, &UIInfo.PosAt, GameState->DebugFont, &ElementAsRect, ClipLeftX(UIInfo.PosAt, ClipRect), UIState->InteractingWith);
+                                        } break;
+                                        case UI_Entity: {
+                                            //Already Rendered Above
+                                            u32 ID = CastVoidAs(u32, UIInfo.ChildElm->Set.ValueLinkedToPtr);
+                                            entity *Entity = FindEntityFromID(GameState, ID);
+                                            v2 EntityRelP = Entity->Pos - CamPos;
+                                            
+                                            ElementAsRect = Rect2CenterDim(EntityRelP, Entity->Dim);
+                                            if(InBounds(ElementAsRect, MouseP_PerspectiveSpace)) {
+                                                NextHotEntity = UIInfo.ChildElm;
+                                                //AddToOutBuffer("Is Hot!\n");
+                                            }
+                                            DrawBacking = false;
+                                            
+                                        } break;
+                                    }
+                                    
+                                    
+                                    UIInfo.ChildElm->Set.Pos = ElementAsRect.Min;
+                                    UIInfo.ChildElm->Set.Dim = ElementAsRect.Max - ElementAsRect.Min;
+                                    
+                                    if(InBounds(ElementAsRect, MouseP_OrthoSpace)) {
+                                        NextHotEntity = UIInfo.ChildElm;
+                                    }
+                                    ///////Finished Drawing UI ELEMENT ///////
+                                    EndUIElmsLoop(&UIInfo, UI_CHILD_LOOP);
+                                    
+                                }
+                                if(EndUIElmsLoop(&UIInfo, UI_OUTER_LOOP)) {
+                                    break;
+                                }
+                            }
+                            
+                            if(DrawBacking) {
+                                rect2 BackingRect = ClipRect;
+                                BackingRect.Max.Y = UIInfo.PosAt.Y;
+                                PushRect(OrthoRenderGroup, BackingRect, 1, V4(0.2f, 0.2f, 0.2f, 0.5f));
+                            }
                         }
                         
                     }
@@ -2298,139 +2423,239 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                 
                 ///////////////
                 
+                if(IsDown(Memory->GameButtons[Button_Control]) && WasPressed(Memory->GameButtons[Button_LetterS])) {
+                    AddToOutBuffer("Save Leveled!\n");
+                    SaveLevelToDisk(Memory, GameState, "level1.omm");
+                }
+                
+                editor_mode EdMode = NULL_MODE;
+                
+                if(!UIState->InteractingWith) {
+                    if(WasPressed(Memory->GameButtons[Button_One])) {
+                        EdMode = editor_mode_Values[1];
+                    }
+                    if(WasPressed(Memory->GameButtons[Button_Two])) {
+                        EdMode = editor_mode_Values[2];
+                    }
+                    if(WasPressed(Memory->GameButtons[Button_Three])) {
+                        EdMode = editor_mode_Values[3];
+                    }
+                    if(WasPressed(Memory->GameButtons[Button_Four])) {
+                        EdMode = editor_mode_Values[4];
+                    }
+                }
+                
+                if(EdMode) {
+                    //This clears the editor mode back to default so 
+                    //we can interact with the ui panels.
+                    //Another way to handle modes is to check if the
+                    // the mouse is hovering over any panels. This would
+                    //then override any mouse clicks to reset the
+                    //mode... Oliver 4/11/17
+                    SetEditorMode(GameState->UIState, EdMode);
+                }
+                
+                
                 if(WasPressed(Memory->GameButtons[Button_LeftMouse])) {
-                    //Add Block
-                    if(IsDown(Memory->GameButtons[Button_Shift])) {
-                        v2i Cell = GetGridLocation(MouseP_PerspectiveSpace + Camera->Pos);
-                        world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, 0, ChunkNull);
-                        /*
-                        if(UIState->CurrentCheckPointParent) {
-                            check_point_parent *Parent = UIState->CurrentCheckPointParent;
-                            Assert(Parent->Count < ArrayCount(Parent->CheckPoints));
-                            check_point *Point = Parent->CheckPoints + Parent->Count++;
-                            Point->Pos = Cell;
-                        } else */
-                        {
-                            enum_array_data *Info = &UIState->InitInfo;
-                            char *A = Info->Type;
-                            if(A) {
-                                if(Chunk) {
-                                    if(DoStringsMatch(A, "entity_type")) {
-                                        CastValue(Info, entity_type);
-                                        v2 Pos = WorldChunkInMeters*V2i(Cell);
-                                        entity *Ent = GetEntityAnyType(GameState, Pos);
-                                        if(Ent) {
-                                            if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
-                                                if(Ent->Type == Entity_Block) {
-                                                    Chunk->Type = Chunk->MainType;
-                                                }
-                                                RemoveEntity(GameState, Ent->Index);
-                                            }
-                                        } else {
-                                            if(Value == Entity_Chunk_Changer) {
-                                                entity *Entity = InitEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
-                                                Entity->LoopChunks = true;
-                                                
-                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                                //This should all be done via the GUI system. After you create the
-                                                //entity maybe you can then select them and see the attributes and 
-                                                //change them as neccessary! Oliver 8/10/17
-                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkLight);
-                                                AddChunkTypeToChunkChanger(Entity, ChunkDark);
-                                            } else if(Value == Entity_CheckPoint) {
-                                                u32 ParentID = UIState->LastCheckPointParentID;
-                                                if(UIState->LastCheckPointParentID) {
-                                                    entity *Parent = FindEntityFromID(GameState, ParentID);
-                                                    entity *Child = AddEntity(GameState, Pos, Value, V2(0.4f, 0.4f));
-                                                    
-                                                    Child->SoundToPlay = &GameState->PushSound[0];
-                                                    AddCheckPointIDToCheckPointParent(Parent, Child->ID);
-                                                    
+                    
+                    
+                    enum_array_data *ModeInfo = &UIState->EditorMode;
+                    CastValue(ModeInfo, editor_mode, EditorMode);
+                    v2i Cell = GetGridLocation(MouseP_PerspectiveSpace + Camera->Pos);
+                    world_chunk *Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, 0, ChunkNull);
+                    switch(EditorMode) {
+                        case CREATE_MODE : {
+                            
+                            
+                            /*
+                            if(UIState->CurrentCheckPointParent) {
+                                check_point_parent *Parent = UIState->CurrentCheckPointParent;
+                                Assert(Parent->Count < ArrayCount(Parent->CheckPoints));
+                                check_point *Point = Parent->CheckPoints + Parent->Count++;
+                                Point->Pos = Cell;
+                            } else */
+                            {
+                                enum_array_data *Info = &UIState->InitInfo;
+                                char *A = Info->Type;
+                                if(A) {
+                                    if(Chunk) {
+                                        if(DoStringsMatch(A, "entity_type")) {
+                                            CastValue(Info, entity_type, Value);
+                                            v2 Pos = WorldChunkInMeters*V2i(Cell);
+                                            entity *Ent = GetEntityAnyType(GameState, Pos);
+                                            if(Ent && IsSolid(Ent) && IsSolidDefault(Value)) {
+                                                //We are Removing the entity
+                                                if(Ent->Type != Entity_Camera && Ent->Type != Entity_Player) {
+                                                    if(IsSolid(Ent)) {
+                                                        Chunk->Type = Chunk->MainType;
+                                                    } else if(Ent->Type == Entity_CheckPoint) {
+                                                        entity *Par = FindEntityFromID(GameState, Ent->CheckPointParentID);
+                                                        
+                                                        b32 Found = false;
+                                                        for(u32 i = 0; i < Par->CheckPointCount; i++) {
+                                                            u32 ID = Par->CheckPointIds[i];
+                                                            if(ID == Ent->ID) {
+                                                                Found = true;
+                                                                Par->CheckPointIds[i] = Par->CheckPointIds[--Par->CheckPointCount];
+                                                            }
+                                                        }
+                                                        Assert(Found);
+                                                    }
+                                                    RemoveEntity(GameState, Ent->Index);
                                                 } else {
-                                                    AddToOutBuffer("No active CheckPoint parent\n");
+                                                    AddToOutBuffer("There is an entity here\n");
                                                 }
-                                                
-                                            } else if(Value == Entity_CheckPointParent) {
-                                                
-                                                entity *Entity = AddEntity(GameState, Pos, Value, V2(0.4f, 0.4f));
-                                                
-                                                //For Editor level purposes
-                                                UIState->LastCheckPointParentID = Entity->ID;
-                                                //
-                                                
-                                                //DEBUG FOR NOW
-                                                
-                                                entity *Phil = FindFirstEntityOfType(GameState, Entity_Philosopher);
-                                                Assert(Phil->CheckPointParentCount < ArrayCount(Phil->CheckPointParentIds));
-                                                u32 Index = ++Phil->CheckPointParentCount;
-                                                Phil->CheckPointParentIds[Index] = Entity->ID;
-                                                
-                                                //Phil->CheckPointParentAt = Index;
-                                                //
-                                                
                                             } else {
-                                                AddEntity(GameState, Pos, Value, V2(1, 1));
+                                                if(Value == Entity_Chunk_Changer) {
+                                                    entity *Entity = AddEntity(GameState, Pos, V2(0.4f, 0.4f), Entity_Chunk_Changer, GameState->EntityIDAt++);
+                                                    Entity->LoopChunks = true;
+                                                    
+                                                    AddChunkTypeToChunkChanger(Entity, ChunkLight);
+                                                    AddChunkTypeToChunkChanger(Entity, ChunkDark);
+                                                    //This should all be done via the GUI system. After you create the
+                                                    //entity maybe you can then select them and see the attributes and 
+                                                    //change them as neccessary! Oliver 8/10/17
+                                                    
+                                                } else if(Value == Entity_CheckPoint) {
+                                                    u32 ParentID = UIState->CheckPointParentID;
+                                                    if(ParentID) {
+                                                        entity *Parent = FindEntityFromID(GameState, ParentID);
+                                                        entity *Child = AddEntity(GameState, Pos, V2(0.4f, 0.4f), Value, GameState->EntityIDAt++);
+                                                        Child->CheckPointParentID = ParentID;
+                                                        AddCheckPointIDToCheckPointParent(Parent, Child->ID);
+                                                        
+                                                    } else {
+                                                        AddToOutBuffer("No active CheckPoint parent\n");
+                                                    }
+                                                    
+                                                } else if(Value == Entity_CheckPointParent) {
+                                                    
+                                                    entity *Entity = AddEntity(GameState, Pos, V2(0.4f, 0.4f), Value,  GameState->EntityIDAt++);
+                                                    
+                                                    //For Editor level purposes
+                                                    UIState->CheckPointParentID = Entity->ID;
+                                                    //
+                                                } else {
+                                                    AddToOutBuffer("Entity Added\n");
+                                                    AddEntity(GameState, Pos, V2(1, 1), Value, GameState->EntityIDAt++);
+                                                }
                                             }
-                                        }
-                                    } 
-                                } 
-                                
-                                if(DoStringsMatch(A, "chunk_type")) {
-                                    CastValue(Info, chunk_type);
-                                    
-                                    if(Chunk && Chunk->Type == Value) {
-                                        RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
-                                    } else {
-                                        if(!Chunk) {
-                                            Assert(Value != ChunkNull);
-                                            Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
                                         } 
-                                        
-                                        Chunk->Type = Value;
+                                    } else {
+                                        AddToOutBuffer("No Chunk Here\n");
                                     }
-                                }
-                            } else {
-                                AddToOutBuffer("No Entity type selected\n");
-                            }
-                        }
-                    } else { //Picking up entities with mouse. 
-                        
-                        if(!UIState->InteractingWith) {
-                            if(!NextHotEntity) {
-#if MOVE_VIA_MOUSE
-                                //NOTE: This is where we move the player.
-                                v2 TargetP_r32 = MouseP_PerspectiveSpace + GameState->Camera->Pos;
-                                InitializeMove(GameState, Player, TargetP_r32);
-#endif
-                            } else {
-                                
-                                //NOTE: This is interactable objects;
-                                
-                                Assert(NextHotEntity->IsValid);
-                                UIState->HotEntity = NextHotEntity;
-                                UIState->InteractingWith = UIState->HotEntity;
-                                
-                                ui_element *InteractEnt = UIState->InteractingWith;
-                                
-                                switch (UIState->InteractingWith->Type) {
-                                    case UI_Entity: {
-                                        GetEntityFromElement(UIState);
-                                        Entity->RollBackPos = Entity->Pos;
-                                    } break;
-                                    case UI_TextBox: {
+                                    
+                                    if(DoStringsMatch(A, "chunk_type")) {
+                                        CastValue(Info, chunk_type, Value);
                                         
-                                    } break;
-                                    default: {
-                                        AddToOutBuffer("There is no initial interaction for the object type \"%s\"\n", element_ui_type_Names[InteractEnt->Type]);
+                                        if(Chunk && Chunk->Type == Value) {
+                                            RemoveWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->ChunkFreeList);
+                                        } else {
+                                            chunk_type PrevType = Value;
+                                            if(!Chunk) {
+                                                Assert(Value != ChunkNull);
+                                                
+                                                
+                                                
+                                                Chunk = GetOrCreateWorldChunk(GameState->Chunks, Cell.X, Cell.Y, &GameState->MemoryArena, Value, &GameState->ChunkFreeList);
+                                            } else {
+                                                PrevType = Chunk->Type;
+                                            } 
+                                            
+                                            Chunk->Type = PrevType;
+                                        }
                                     }
+                                } else {
+                                    AddToOutBuffer("No Entity type selected\n");
                                 }
                             }
-                        }
+                        } break; 
+                        case EDIT_CHECKPOINT_CHUNKS_MODE: {
+                            if(UIState->PhilosopherID && UIState->CheckPointParentID) {
+                                entity *Ent = FindEntityFromID(GameState, UIState->PhilosopherID);
+                                if(Ent) {
+                                    if(Chunk) {
+                                        AddToOutBuffer("Check Point Parent Added\n");
+                                        world_chunk *EntityChunk = GetOrCreateWorldChunk(Ent->ParentCheckPointIds, Cell.X, Cell.Y, &GameState->MemoryArena, (chunk_type)UIState->CheckPointParentID, &GameState->ChunkFreeList);
+                                    }
+                                }
+                            }
+                        } break;
+                        default: { //Picking up entities with mouse. 
+                            
+                            if(!UIState->InteractingWith) {
+                                //Here we set what we are interacting with
+                                if(NextHotEntity) {
+                                    Assert(NextHotEntity->IsValid);
+                                    UIState->HotEntity = NextHotEntity;
+                                    UIState->InteractingWith = UIState->HotEntity;
+                                    
+                                    ui_element *InteractEnt = UIState->InteractingWith;
+                                    
+                                    switch (UIState->InteractingWith->Type) {
+                                        case UI_Entity: {
+                                            GetEntityFromElement(UIState);
+                                            Entity->RollBackPos = Entity->Pos;
+                                            
+                                            
+                                            if(EditorMode == INTROSPECT_MODE) {
+                                                
+                                                ClearIntrospectWindow(UIState);
+                                                
+                                                if(!UIState->TempUIStack) {
+                                                    
+                                                    UIState->EntIntrospecting = Entity;
+                                                    ui_element_settings UISet = {};
+                                                    UISet.Pos = V2(300, 20);
+                                                    u32 ParentElmIndex = PushUIElement(GameState->UIState, UI_Moveable,  UISet);
+                                                    
+                                                    ui_element *ParentElm = UIState->Elements + ParentElmIndex;
+                                                    
+                                                    UISet.ValueLinkedToPtr = &ParentElm->Set.ScrollAt;
+                                                    AddUIElement(GameState->UIState, UI_Slider,  UISet);
+                                                    {
+                                                        for(u32 i = 0; i < ArrayCount(entity_Names) - 1; i += 1) {
+                                                            
+                                                            introspect_info *Info = entity_Names + i;
+                                                            
+                                                            u32 CharCount = 256;
+                                                            char *Text = PushArray(&GameState->StringArena, char, CharCount);
+                                                            char *At = Text;
+                                                            s32 SizeOfString = PrintS(Text, CharCount, "%s %s: ", Info->Type, Info->Name);
+                                                            At += SizeOfString;
+                                                            
+                                                            u32 Offset = Info->Offset;
+                                                            
+                                                            UISet.Type = Info->Type;
+                                                            UISet.ValueLinkedToPtr = ((u8 *)Entity) + Offset;
+                                                            UISet.Name = Text;
+                                                            
+                                                            memory_arena *TempArena = &UIState->TransientTextBoxArena;
+                                                            InitCharBuffer(&UISet.Buffer, 256, TempArena, TempArena);
+                                                            
+                                                            AddUIElement(GameState->UIState, UI_TextBox, UISet);
+                                                        }
+                                                    }
+                                                    PopUIElement(GameState->UIState);
+                                                    
+                                                    //This is to remove the stack later;
+                                                    Assert(ParentElm->Parent);
+                                                    UIState->TempUIStack = ParentElm->Parent;
+                                                } else {
+                                                    InvalidCodePath;
+                                                }
+                                            }
+                                        } break;
+                                        case UI_Moveable: {
+                                            UIState->MouseGrabOffset = MouseP_OrthoSpace - InteractEnt->Parent->Set.Pos;
+                                        } break;
+                                        default: {
+                                            AddToOutBuffer("There is no initial interaction for the object type \"%s\"\n", element_ui_type_Names[InteractEnt->Type]);
+                                        }
+                                    }
+                                }
+                            }
+                        } break;
                     }
                 }
                 if(WasReleased(Memory->GameButtons[Button_LeftMouse])) {
@@ -2445,7 +2670,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 ui_element *Parent = InteractEnt->Parent;
                                 
                                 //VIEW
-                                Parent->Set.Name = InteractEnt->Set.Name;
+                                //Parent->Set.Name = InteractEnt->Set.Name;
                                 
                                 //DATA
                                 enum_array_data *ValueToMod = (enum_array_data *)InteractEnt->Set.ValueLinkedToPtr;
@@ -2456,13 +2681,18 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                 Parent->Set.Active = !Parent->Set.Active;
                             } break;
                             case UI_Moveable: {
-                                
+                                InteractEnt->Set.Active = !InteractEnt->Set.Active;
                             } break;
                             case UI_Button: {
                                 // TODO(Oliver): Can we make this more generic?
-                                if(DoStringsMatch(InteractEnt->Set.Type, "Save Level")) {
+                                char *ButtonIdentifier = InteractEnt->Set.Type;
+                                if(DoStringsMatch(ButtonIdentifier, "Save Level")) {
                                     SaveLevelToDisk(Memory, GameState, "level1.omm");
                                 }
+                                if(DoStringsMatch(ButtonIdentifier, "Clear Introspect Window")) {
+                                    ClearIntrospectWindow(UIState);
+                                }
+                                
                             } break;
                             case UI_Entity: {
                                 GetEntityFromElement(UIState);
@@ -2502,69 +2732,19 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                     switch(UIState->InteractingWith->Type) {
                         case UI_Entity: {
                             GetEntityFromElement(UIState);
-                            if(Entity->Type == Entity_Block) {
-                                SetChunkType(GameState, Entity->Pos, ChunkMain);
-                                
-                                Entity->Pos = WorldChunkInMeters*GetGridLocationR32(MouseP_PerspectiveSpace + CamPos);
-                                v2 P = (MouseP_PerspectiveSpace + CamPos);
-                                
-                                
-                                SetChunkType(GameState, Entity->Pos, ChunkBlock);
-                            } else {
-                                AddToOutBuffer("There is no down interaction for the object type \"%s\"\n", entity_type_Names[Entity->Type]);
+                            
+                            v2 NewEntityPos = WorldChunkInMeters*GetGridLocationR32(MouseP_PerspectiveSpace + CamPos);
+                            
+                            SetChunkType(GameState, Entity->Pos, ChunkMain);
+                            Entity->Pos = NewEntityPos;
+                            
+                            if(IsSolid(Entity)) {
+                                SetChunkType(GameState, Entity->Pos, ChunkEntity);
                             }
-                            
-#define INTROSPECT_ENTITIES 1
-#if INTROSPECT_ENTITIES
-                            
-                            
-                            if(UIState->TempUIStack) {
-                                RemoveUIElmAndChildren(UIState,UIState->TempUIStack);
-                                UIState->TempUIStack = 0;
-                            }
-                            
-                            if(!UIState->TempUIStack) {
-                                ui_element_settings UISet = {};
-                                UISet.Pos = V2(300, 20);
-                                u32 ParentElmIndex = PushUIElement(GameState->UIState, UI_Moveable,  UISet);
-                                {
-                                    for(u32 i = 0; i < ArrayCount(entity_Names) - 1; i += 1) {
-                                        
-                                        introspect_info *Info = entity_Names + i;
-                                        
-                                        u32 CharCount = 256;
-                                        char *Text = PushArray(&GameState->StringArena, char, CharCount);
-                                        char *At = Text;
-                                        s32 SizeOfString = PrintS(Text, CharCount, "%s %s: ", Info->Type, Info->Name);
-                                        At += SizeOfString;
-                                        
-                                        u32 Offset = Info->Offset;
-                                        
-                                        UISet.Type = Info->Type;
-                                        UISet.ValueLinkedToPtr = ((u8 *)Entity) + Offset;
-                                        UISet.Name = Text;
-                                        
-                                        memory_arena *TempArena = &UIState->TempArena;
-                                        InitCharBuffer(&UISet.Buffer, 256, TempArena, TempArena);
-                                        
-                                        AddUIElement(GameState->UIState, UI_TextBox, UISet);
-                                    }
-                                }
-                                PopUIElement(GameState->UIState);
-                                
-                                //This is to remove the stack later;
-                                ui_element *ParentElm = UIState->Elements[ParentElmIndex].Parent;
-                                Assert(ParentElm);
-                                UIState->TempUIStack = ParentElm;
-                            } else {
-                                InvalidCodePath;
-                            }
-#endif
-                            
                         } break;
                         case UI_Moveable:{
                             rect2 BarDim = Rect2MinDim(V2(0, 0), Interact->Set.Dim);
-                            v2 ClampedMouseP = Clamp(MouseP_OrthoSpace, Subtract(BufferRect, BarDim));
+                            v2 ClampedMouseP = Clamp(MouseP_OrthoSpace - UIState->MouseGrabOffset, Subtract(BufferRect, BarDim));
                             //We assume parent will always be the most outer ui element...Have an Assert here. 
                             Interact->Parent->Set.Pos = ClampedMouseP;
                         } break;

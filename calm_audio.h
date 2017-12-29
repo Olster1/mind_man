@@ -13,7 +13,7 @@ struct loaded_sound {
     
     int16 *Samples[2];
     
-    
+    char *FileName;
 };
 
 struct playing_sound

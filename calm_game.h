@@ -78,8 +78,7 @@ enum chunk_type {
     ChunkNull, 
     ChunkLight,
     ChunkDark,
-    ChunkBlock,
-    ChunkDoor,
+    ChunkEntity,
     ChunkMain,
     
     ChunkTypeCount
@@ -152,8 +151,11 @@ struct game_state
     
     u32 TextureHandleIndex;
     
+    loaded_sound OpenSound;
     loaded_sound MenuBackgroundMusic;
     loaded_sound BackgroundMusic;
+    
+    u32 PushSoundCount;
     loaded_sound PushSound[4];
     loaded_sound FootstepsSound[32];
     

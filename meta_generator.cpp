@@ -239,6 +239,18 @@ static b32 DoStringsMatch(char *A, u32 Length, char *NullTerminatedString)
     
 }
 
+static void Concat(char *A, u32 ALength, char *B, u32 BLength, void *Memory) {
+    
+    u8 *At = (u8 *)Memory;
+    for(u32 i = 0; i < ALength; ++i) {
+        *At++ = *A++;
+    }
+    
+    for(u32 i = 0; i < ALength; ++i) {
+        *At++ = *B++;
+    }
+}
+
 static token GetNextToken(tokenizer *Tokenizer)
 {
     token Token = {};
@@ -343,6 +355,17 @@ static token GetNextToken(tokenizer *Tokenizer)
     
     return Token;
     
+}
+
+
+static token SeeNextToken(tokenizer *Tokenizer) {
+    u8 *At = Tokenizer->At;
+    
+    token Result = GetNextToken(Tokenizer);
+    
+    Tokenizer->At = At;
+    
+    return Result;
 }
 
 enum tree_element_type
@@ -562,10 +585,18 @@ ParseStructArray(tokenizer *Tokenizer, token Token) {
     while(Token.Type != Token_CloseBracket) {
         Token = GetNextToken(Tokenizer);
         
-        if(Token.Type == Token_VariableName) {
-            AddWord(Words, Token);
-            NameCount++;
-        } else if(Token.Type == Token_VariableType) {
+        if(Token.Type == Token_VariableName || 
+           Token.Type == Token_VariableType) {
+            token NextToken = SeeNextToken(Tokenizer);
+            if(NextToken.Type == Token_Astrix) {
+                Token.Text; 
+                char *PointerText = " *";
+                u32 LengthPointerText = StringLength(PointerText);
+                u32 SizeToAlloc = Token.TextLength + LengthPointerText;
+                char *Text = (char *)malloc(SizeToAlloc);
+                Concat(Token.Text, Token.TextLength, PointerText, LengthPointerText, Text);
+                SetTokenText(&Token, Text, SizeToAlloc);
+            }
             AddWord(Words, Token);
             NameCount++;
         } else if(Token.Type == Token_ForwardSlash) {

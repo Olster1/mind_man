@@ -298,7 +298,7 @@ CopyStringToBuffer(char *Buffer, u32 BufferSize, char *StringToCopy)
         ++Letter)
     {
         *BufferAt++ = *Letter;
-        Assert(Count < (BufferSize - 1));
+        Assert(Count < (BufferSize));
         Count++;
     }
     

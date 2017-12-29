@@ -142,9 +142,11 @@
                  case 's':
                  {
                      char *Argument = NextArgument(Arguments, char *);
-                     while(*Argument)
-                     {
-                         *TextBufferAt++ = *Argument++;
+                     if(Argument) {
+                         while(*Argument)
+                         {
+                             *TextBufferAt++ = *Argument++;
+                         }
                      }
                  } break;
                  case 'b':

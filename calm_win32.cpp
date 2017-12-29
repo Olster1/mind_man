@@ -925,6 +925,7 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 GetButtonState(GameMemory.GameButtons + Button_Down, VK_DOWN, 0x53);
                 GetButtonState(GameMemory.GameButtons + Button_Left, VK_LEFT, 0x41);
                 GetButtonState(GameMemory.GameButtons + Button_Right, VK_RIGHT, 0x44);
+                
                 //////////////////
                 // TODO(OLIVER): Replace this using the asci array in order to get the nice lag time on key press
                 GetButtonState(GameMemory.GameButtons + Button_Arrow_Left, VK_LEFT);
@@ -935,11 +936,23 @@ int WinMain(HINSTANCE Instance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nC
                 GetButtonState(GameMemory.GameButtons + Button_Enter, VK_RETURN);
                 GetButtonState(GameMemory.GameButtons + Button_Shift, VK_SHIFT);
                 
+                GetButtonState(GameMemory.GameButtons + Button_Control, VK_CONTROL);
+                
                 GetButtonState(GameMemory.GameButtons + Button_F1, VK_F1);
                 
                 
                 GetButtonState(GameMemory.GameButtons + Button_F2, VK_F2);
                 GetButtonState(GameMemory.GameButtons + Button_F3, VK_F3);
+                
+                GetButtonState(GameMemory.GameButtons + Button_One, 0x31);
+                
+                GetButtonState(GameMemory.GameButtons + Button_Two, 0x32);
+                
+                GetButtonState(GameMemory.GameButtons + Button_Three, 0x33);
+                
+                GetButtonState(GameMemory.GameButtons + Button_Four, 0x34);
+                
+                GetButtonState(GameMemory.GameButtons + Button_LetterS, 0x53);
                 
                 GetButtonState(GameMemory.GameButtons + Button_LeftMouse, VK_LBUTTON);
                 GetButtonState(GameMemory.GameButtons + Button_RightMouse, VK_RBUTTON);

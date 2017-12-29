@@ -28,7 +28,7 @@ inline void Reactivate(particle_system *System) {
     System->Active = true;
 }
 
-internal inline void DrawParticleSystem(particle_system *System, render_group *RenderGroup, r32 dt, v2 Origin, v3 Acceleration) {
+internal inline void DrawParticleSystem(particle_system *System, render_group *RenderGroup, r32 dt, v2 Origin, v3 Acceleration, v2 CamPos) {
     if(System->Active) {
         real32 GridScale = 0.2f;
         real32 Inv_GridScale = 1.0f / GridScale;
@@ -172,8 +172,8 @@ internal inline void DrawParticleSystem(particle_system *System, render_group *R
             }
             
             
-            v3 Pos = Particle->P + ToV3(Origin, 0);
-            PushBitmap(RenderGroup, Pos, Bitmap, 0.8f, Rect2(0, 0, RenderGroup->ScreenDim.X, RenderGroup->ScreenDim.Y), Color);
+            v3 Pos = Particle->P + ToV3(Origin, 1) - ToV3(CamPos, 0);
+            PushBitmap(RenderGroup, Pos, Bitmap, 0.8f, Rect2(0, 0, RenderGroup->ScreenDim.X, RenderGroup->ScreenDim.Y), V4(1, 1, 1, 1));
         }
         System->Set.LifeSpan -= dt;
         if(System->Set.LifeSpan <= 0.0f) {
