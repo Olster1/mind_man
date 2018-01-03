@@ -1,6 +1,6 @@
                     struct introspect_info {
                     char *Type;
                     char *Name;
-                    u32 Offset;
+                    intptr Offset;
                     b32 IsArray;
 };

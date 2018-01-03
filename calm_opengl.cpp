@@ -26,9 +26,9 @@ struct opengl_info {
     char *ShandingLanguageVersion; 
     char *Extensions;
     
-    b32 GL_ARB_framebuffer_sRGB;
-    b32 GL_EXT_texture_sRGB;
-    b32 GL_ARB_texture_non_power_of_two;
+    b32 GL_ARB_framebuffer_sRGB_Ext;
+    b32 GL_EXT_texture_sRGB_Ext;
+    b32 GL_ARB_texture_non_power_of_two_Ext;
 };
 
 inline opengl_info OpenGlGetExtensions(b32 ModernContext) {
@@ -55,9 +55,9 @@ inline opengl_info OpenGlGetExtensions(b32 ModernContext) {
         }
         s32 Length = (s32)((intptr)At - (intptr)Begin);
         if(0) {}
-        else if(DoStringsMatch("GL_ARB_framebuffer_sRGB", Begin, Length)) { Result.GL_ARB_framebuffer_sRGB = true; }
-        else if(DoStringsMatch("GL_EXT_texture_sRGB", Begin, Length)) { Result.GL_EXT_texture_sRGB = true; }
-        else if(DoStringsMatch("GL_ARB_texture_non_power_of_two", Begin, Length)) { Result.GL_ARB_texture_non_power_of_two = true; }
+        else if(DoStringsMatch("GL_ARB_framebuffer_sRGB", Begin, Length)) { Result.GL_ARB_framebuffer_sRGB_Ext = true; }
+        else if(DoStringsMatch("GL_EXT_texture_sRGB", Begin, Length)) { Result.GL_EXT_texture_sRGB_Ext = true; }
+        else if(DoStringsMatch("GL_ARB_texture_non_power_of_two", Begin, Length)) { Result.GL_ARB_texture_non_power_of_two_Ext = true; }
         
         while(IsWhiteSpace(*At)) {
             At++;
@@ -72,11 +72,11 @@ internal void OpenGlInit(b32 ModernContext) {
     opengl_info OpenGlInfo = OpenGlGetExtensions(ModernContext);
     
     GlobalOpenGlDefaultInternalTextureFormat = GL_RGBA8;
-    if(OpenGlInfo.GL_EXT_texture_sRGB) {
+    if(OpenGlInfo.GL_EXT_texture_sRGB_Ext) {
         //GlobalOpenGlDefaultInternalTextureFormat = GL_SRGB8_ALPHA8;
     }
     
-    if(OpenGlInfo.GL_ARB_framebuffer_sRGB) 
+    if(OpenGlInfo.GL_ARB_framebuffer_sRGB_Ext) 
     {
         glEnable(GL_FRAMEBUFFER_SRGB);
         

@@ -5,9 +5,13 @@
    $Creator: Oliver Marsh $
    $Notice: (C) Copyright 2015 by Molly Rocket, Inc. All Rights Reserved. $
    ======================================================================== */
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdint.h>
+
+#if MAC_PORT
+#define sprintf(...) snprintf(__VA_ARGS__)
+#endif
 
 typedef int8_t s8;
 typedef int16_t s16;
@@ -37,8 +41,7 @@ typedef intptr_t intptr;
 static void *ReadFileWithNullTerminator(char *FileName)
 {
     
-    FILE *FileHandle;
-    fopen_s(&FileHandle, FileName, "rb");
+    FILE *FileHandle = fopen(FileName, "rb");
     
     fseek(FileHandle, 0, SEEK_END);
     size_t FileSize = ftell(FileHandle);
@@ -493,9 +496,9 @@ static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char 
     char *At = cb;
     size_t LastSize = 0;
     if(ArrayTypeAsString) {
-        sprintf_s(cb, sizeof(cb), Begin, ArrayTypeAsString, EnumName.TextLength, EnumName.Text);
+        sprintf(cb, sizeof(cb), Begin, ArrayTypeAsString, EnumName.TextLength, EnumName.Text);
     } else {
-        sprintf_s(cb, sizeof(cb), Begin, EnumName.TextLength, EnumName.Text, EnumName.TextLength, EnumName.Text);
+        sprintf(cb, sizeof(cb), Begin, EnumName.TextLength, EnumName.Text, EnumName.TextLength, EnumName.Text);
     }
     At += StringLength(cb) - LastSize;
     LastSize = At - cb;
@@ -515,10 +518,10 @@ static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char 
                 }
                 Assert(i < Words.Count);
                 string NextWord = Words.Strings[i];
-                sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, NextWord.Length, NextWord.E, EnumName.TextLength, EnumName.Text, NextWord.Length, NextWord.E, Comma);
+                sprintf(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, NextWord.Length, NextWord.E, EnumName.TextLength, EnumName.Text, NextWord.Length, NextWord.E, Comma);
             } 
         } else {
-            sprintf_s(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, Comma);
+            sprintf(At, sizeof(cb) - (At - cb), PerItem, Word.Length, Word.E, Comma);
         }
         
         At += StringLength(cb) - LastSize;
@@ -529,12 +532,12 @@ static void ProduceArray(tokenizer *Tokenizer, char *Begin, char* PerItem, char 
     if(!ArrayType) {
         // NOTE(NAME): This is putting the type at the end of the char * array, so we can match strings to get type info!
         if(ArrayTypeAsString) {
-            sprintf_s(At, sizeof(cb) - (At - cb), "\"%.*s\"", EnumName.TextLength, EnumName.Text);
+            sprintf(At, sizeof(cb) - (At - cb), "\"%.*s\"", EnumName.TextLength, EnumName.Text);
             At += StringLength(cb) - LastSize;
         }
         //////
     }
-    sprintf_s(At, sizeof(cb) - (At - cb), End);
+    sprintf(At, sizeof(cb) - (At - cb), End);
     fwrite(cb, StringLength(cb), 1,Tokenizer->FileHandles[FileHandle]);
     
 }
@@ -606,7 +609,7 @@ ParseStructArray(tokenizer *Tokenizer, token Token) {
         }
     }
     
-    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "{\"%.*s\", \"%.*s\", (intptr)&(((%.*s *)0)->%.*s)}%s", "};\n", EnumName, Words, "introspect_info ", INTROSPECT_STRUCTS, "INTROSPECT");
+    ProduceArray(Tokenizer, "static %s%.*s_Names[] = {\n", "{\"%.*s\", \"%.*s\", (intptr)(&(((%.*s *)0)->%.*s))}%s", "};\n", EnumName, Words, "introspect_info ", INTROSPECT_STRUCTS, "INTROSPECT");
     
     //ProduceArray(Tokenizer, "static %.*s %.*s_Values[] = {\n", "%.*s%s", "};\n", EnumName, Words, 0, INTROSPECT_STRUCTS);
     
@@ -637,14 +640,14 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
             char cb[256];
             string Str = Words.Strings[Words.Count - 1];
             if(Str.Length == 1) {
-                sprintf_s(cb, sizeof(cb), "{%.*s, '%.*s'}, ", Token.TextLength, Token.Text, Str.Length, Str.E);
+                sprintf(cb, sizeof(cb), "{%.*s, '%.*s'}, ", Token.TextLength, Token.Text, Str.Length, Str.E);
                 
                 fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[KEY_TYPES_FILE]);
                 
             }
             
             char cb1[256];
-            sprintf_s(cb1, sizeof(cb1), "%.*s,\n", Token.TextLength, Token.Text);
+            sprintf(cb1, sizeof(cb1), "%.*s,\n", Token.TextLength, Token.Text);
             
             fwrite(cb1, StringLength(cb1), 1, Tokenizer->FileHandles[KEY_TYPES_FILE]);
         }
@@ -670,9 +673,11 @@ ParseKeyFunction(tokenizer *Tokenizer, token Token)
     u32 TextLength2 = (u32)((char *)Tokenizer->At - TextStart2);
     
     char cb[256];
-    sprintf_s(cb,sizeof(cb), "%.*s_%.*s, %.*s%.*s\n", TextLength0, TextStart0, TextLength1, TextStart1, 1, ParameterCountAsString, TextLength2, TextStart2);
+    sprintf(cb,sizeof(cb), "%.*s_%.*s, %.*s%.*s\n", TextLength0, TextStart0, TextLength1, TextStart1, 1, ParameterCountAsString, TextLength2, TextStart2);
     
+#if !MAC_PORT
     fwrite(cb, StringLength(cb), 1, Tokenizer->FileHandles[KEY_FUNCTIONS_FILE]);
+#endif
     
     
 }
@@ -1258,8 +1263,8 @@ EVALUTE_GROUP(EvaluateGroup)
 }
 
 static FILE *OpenFileHandle(char *FileName) {
-    FILE *FileHandle;
-    fopen_s(&FileHandle, FileName, "w");
+    
+    FILE *FileHandle = fopen(FileName, "w");
     //Assert(FileHandle);
     return FileHandle;
 } 

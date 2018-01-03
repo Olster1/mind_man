@@ -108,6 +108,7 @@ struct v2i
 #define TAU32 6.28318530717958f
 
 #include <float.h>
+#include <limits.h>
 #define MAX_U32 0xFFFFFFFF
 #define MAX_S32 2147483647
 
@@ -130,8 +131,8 @@ struct v2i
 
 #define forN_(Count, Name) for(u32 Name = 0; Name < Count; Name++)
 #define forN_s(Count, Name) for(s32 Name = 0; Name < Count; Name++)
-#define forN(Count) forN_(Count, ##Count##Index)
-#define forNs(Count) forN_s(Count, ##Count##Index)
+#define forN(Count) forN_(Count, Count##Index)
+#define forNs(Count) forN_s(Count, Count##Index)
 #define Flip(Value) Value = !Value
 
 #define DEFAULT_ALIGNMENT 4
@@ -158,7 +159,8 @@ struct v2i
 
 #define Introspect 
 
-#include <intrin.h>
+#include <emmintrin.h>
+#include <mmintrin.h>
 #include "calm_intrinsics.h"
 #include "calm_math.h"
 #include "calm_print.cpp"
@@ -218,13 +220,12 @@ struct thread_work
 
 struct thread_info
 {
-    HANDLE Semaphore;
-    LPVOID WindowHandle;
+    SDL_sem *Semaphore;
+    SDL_Window *WindowHandle;
     thread_work WorkQueue[256];
-    volatile u32 IndexToTakeFrom;
-    volatile u32 IndexToAddTo;
-    HGLRC ContextForThread;
-    HDC WindowDC;
+    SDL_atomic_t IndexToTakeFrom;
+    SDL_atomic_t IndexToAddTo;
+    SDL_GLContext ContextForThread;
 };
 
 #define PLATFORM_PUSH_WORK_ONTO_QUEUE(name) void name(thread_info *Info, thread_work_function *WorkFunction, void *Data)

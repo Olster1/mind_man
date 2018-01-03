@@ -605,7 +605,8 @@ AddEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type EntityType, u32 ID,
     return Ent;
 }
 
-#define GetEntity(State, Pos, Type, ...) GetEntity_(State, Pos, Type, __VA_ARGS__)
+
+#define GetEntity(State, Pos, Type) GetEntity_(State, Pos, Type)
 #define GetEntityAnyType(State, Pos) GetEntity_(State, Pos, Entity_Null, true, false)
 
 internal entity *
@@ -1186,7 +1187,8 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         char *BaseName = "knight/knight iso char_";
         //char *BaseName = "knight iso char_";
         
-#define CREATE_NAME(Append) CREATE_NAME_(Append##.png)
+#define FILE_EXTENSION .png
+#define CREATE_NAME(Append) CREATE_NAME_(Append##FILE_EXTENSION)
 #define CREATE_NAME_(Append) CREATE_NAME__(#Append)
 #define CREATE_NAME__(Append) Concat(&GameState->StringArena, BaseName, Append)
         {
