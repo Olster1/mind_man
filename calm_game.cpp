@@ -605,7 +605,8 @@ AddEntity(game_state *GameState, v2 Pos, v2 Dim, entity_type EntityType, u32 ID,
     return Ent;
 }
 
-#define GetEntity(State, Pos, Type, ...) GetEntity_(State, Pos, Type, __VA_ARGS__)
+
+#define GetEntity(State, Pos, Type) GetEntity_(State, Pos, Type)
 #define GetEntityAnyType(State, Pos) GetEntity_(State, Pos, Entity_Null, true, false)
 
 internal entity *
@@ -1127,7 +1128,6 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->RenderConsole = true;
         
-        
         GameState->MenuBackgroundMusic = LoadWavFileDEBUG(Memory, "Moonlight_Hall.wav", 0, 0, &GameState->MemoryArena);
         GameState->MenuModeSoundInstance = PlaySound(&GameState->AudioState, &GameState->MenuBackgroundMusic);
         GameState->MenuModeSoundInstance->Loop = true;
@@ -1168,8 +1168,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         GameState->DarkTiles[BOTTOM_CENTER_TILE] = LoadBitmap(Memory, 0, "static_bottom.bmp");
         GameState->DarkTiles[BOTTOM_RIGHT_TILE] = LoadBitmap(Memory, 0, "static_right.bmp");
         
-        GameState->Crate = LoadImage(Memory, &GameState->MemoryArena, "crate.bmp ", V2(0.5f, 0.3f));
-        //GameState->Crate = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.3f));
+        //GameState->Crate = LoadImage(Memory, &GameState->MemoryArena, "crate.bmp ", V2(0.5f, 0.3f));
+        GameState->Crate = LoadBitmap(Memory, 0, "door4.bmp", V2(0.5f, 0.3f));
+        
         GameState->Water = LoadBitmap(Memory, 0, "water3.bmp");
         GameState->Desert = LoadBitmap(Memory, 0, "desert.bmp");
         
@@ -1186,9 +1187,11 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         char *BaseName = "knight/knight iso char_";
         //char *BaseName = "knight iso char_";
         
-#define CREATE_NAME(Append) CREATE_NAME_(Append##.png)
-#define CREATE_NAME_(Append) CREATE_NAME__(#Append)
-#define CREATE_NAME__(Append) Concat(&GameState->StringArena, BaseName, Append)
+        
+#define FILE_EXTENSION ".png"
+#define CREATE_NAME(Append) CREATE_NAME_(#Append)
+#define CREATE_NAME_(Append) Concat(&GameState->StringArena, BaseName, Concat(&GameState->StringArena, Append, FILE_EXTENSION))
+        
         {
             char *FileNames[] = {
                 CREATE_NAME(idle_0),
@@ -1473,7 +1476,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
     rect2 BufferRect = Rect2(0, 0, (r32)Buffer->Width, (r32)Buffer->Height);
     
     v2 BufferSize = 0.5f*BufferRect.Max;
-    PushClear(RenderGroup, V4(0.5f, 0.5f, 0.5f, 1));
+    
+    PushClear(RenderGroup, V4(0.5f, 0.5f, 0, 1));
+    
     PushBitmap(RenderGroup, V3(0, 0, 1), &GameState->BackgroundImage, BufferRect.Max.X/MetersToPixels, BufferRect);
     // TODO(Oliver): I guess it doesn't matter but maybe push this to the ortho group once z-index scheme is in place. 
     
@@ -2624,7 +2629,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
                                                             s32 SizeOfString = PrintS(Text, CharCount, "%s %s: ", Info->Type, Info->Name);
                                                             At += SizeOfString;
                                                             
-                                                            u32 Offset = Info->Offset;
+                                                            intptr Offset = Info->Offset;
                                                             
                                                             UISet.Type = Info->Type;
                                                             UISet.ValueLinkedToPtr = ((u8 *)Entity) + Offset;

@@ -163,7 +163,8 @@ inline void InitBitmap(bitmap *Bitmap, s32 Width, s32 Height, s32 SizeOfPixel, v
     Bitmap->Height = Height;
     Bitmap->Pitch = Width * SizeOfPixel;
     Bitmap->AlignPercent = AlignPercent;
-    Bitmap->Handle = 0;
+    Bitmap->Handle = {};
+    
     Bitmap->LoadState = RESOURCE_NOT_LOADED;
 }
 
@@ -248,11 +249,15 @@ LoadBitmap(game_memory *Memory, memory_arena *MemoryArena, char *FileName, v2 Al
 #if 1
 //#define ExtractBits(Pointer, Shift) (u32)((*Pointer >> Shift) & 0xff)
 internal bitmap LoadImage(game_memory *Memory, memory_arena *Arena, char *Filename, v2 AlignPercent) {
-    int x,y,n;
+    
+    int x = 0;
+    int y = 0;
+    int n = 0;
     char *data = (char *)stbi_load(Filename, &x, &y, &n, 4);
     
     Assert(x != 0 && y != 0);
-    //Assert(n == 4);
+    Assert(n != 0);
+    
     
     bitmap Result = CreateNewBitmap(Arena, x, y, true, V4(1, 0, 1, 1));
     //bitmap Result = LoadBitmap(Memory, Arena, Filename);
@@ -574,7 +579,10 @@ void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpa
     
     switch(Bitmap->LoadState) {
         case RESOURCE_NOT_LOADED: {
-            Assert(!Bitmap->Handle);
+            
+            Assert(!Bitmap->Handle.value);
+            Assert(!Bitmap->Handle.modified);
+            
             //We are the only ones asking for memory arena. Other threads can release them but can't use them. 
             game_state *GameState = Group->GameState;
             memory_arena *Arena = GetThreadMemoryArena(GameState);
@@ -590,9 +598,15 @@ void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpa
                 Data->Bitmap = Bitmap;
                 Data->MemoryMark = TempMem;
                 
+                glGenTextures(1, &Data->TextureHandle);
+                
+                
                 Group->Memory->PlatformPushWorkOntoQueue(Group->ThreadInfo, OpenGlLoadTextureThreadWork, Data);
 #else 
-                OpenGlLoadTexture(Bitmap, ++GameState->TextureHandleIndex);
+                GLuint id;
+                glGenTextures(1, &id);
+                OpenGlLoadTexture(Bitmap, id);
+                
                 Bitmap->LoadState = RESOURCE_LOADED;
 #endif
             }
@@ -604,6 +618,8 @@ void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpa
             Assert(Bitmap->LoadState == RESOURCE_LOADED);
             render_element_header *Header = (render_element_header *)PushSize(&Group->Arena, sizeof(render_element_bitmap) + sizeof(render_element_header));
             
+            
+            Assert(Bitmap->Handle.value);
             
             Header->Type = render_bitmap;
             render_element_bitmap *Info = (render_element_bitmap *)(Header + 1);

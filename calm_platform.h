@@ -108,6 +108,9 @@ struct v2i
 #define TAU32 6.28318530717958f
 
 #include <float.h>
+
+#include <limits.h>
+
 #define MAX_U32 0xFFFFFFFF
 #define MAX_S32 2147483647
 
@@ -130,8 +133,10 @@ struct v2i
 
 #define forN_(Count, Name) for(u32 Name = 0; Name < Count; Name++)
 #define forN_s(Count, Name) for(s32 Name = 0; Name < Count; Name++)
-#define forN(Count) forN_(Count, ##Count##Index)
-#define forNs(Count) forN_s(Count, ##Count##Index)
+
+#define forN(Count) forN_(Count, Count##Index)
+#define forNs(Count) forN_s(Count, Count##Index)
+
 #define Flip(Value) Value = !Value
 
 #define DEFAULT_ALIGNMENT 4
@@ -158,7 +163,13 @@ struct v2i
 
 #define Introspect 
 
+#if MAC_PORT
+#include <emmintrin.h>
+#include <mmintrin.h>
+#else
 #include <intrin.h>
+#endif
+
 #include "calm_intrinsics.h"
 #include "calm_math.h"
 #include "calm_print.cpp"
@@ -218,6 +229,14 @@ struct thread_work
 
 struct thread_info
 {
+#if MAC_PORT
+    SDL_sem *Semaphore;
+    SDL_Window *WindowHandle;
+    thread_work WorkQueue[256];
+    SDL_atomic_t IndexToTakeFrom;
+    SDL_atomic_t IndexToAddTo;
+    SDL_GLContext ContextForThread;
+#else 
     HANDLE Semaphore;
     LPVOID WindowHandle;
     thread_work WorkQueue[256];
@@ -225,6 +244,7 @@ struct thread_info
     volatile u32 IndexToAddTo;
     HGLRC ContextForThread;
     HDC WindowDC;
+#endif
 };
 
 #define PLATFORM_PUSH_WORK_ONTO_QUEUE(name) void name(thread_info *Info, thread_work_function *WorkFunction, void *Data)
@@ -311,12 +331,18 @@ enum resource_load_state {
     RESOURCE_LOADED,
 };
 
+
+struct gl_handle {
+    u32 value;
+    b32 modified;
+};
+
 struct bitmap
 {
     u32 Width;
     u32 Height;
     s32 Pitch;
-    u32 Handle;
+    gl_handle Handle;
     v2 AlignPercent;
     
     void *Bits;
@@ -550,6 +576,9 @@ inline void
 EmptyMemoryArena(memory_arena *Arena) {
     Assert(Arena->TempMemCount == 0);
     Arena->CurrentSize = 0;
+    
+    ClearMemory(Arena->Base, (u32)Arena->TotalSize);
+    
 }
 
 inline char *Concat(memory_arena *Arena, char *A, char *B) {
