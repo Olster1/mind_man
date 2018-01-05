@@ -312,12 +312,17 @@ enum resource_load_state {
     RESOURCE_LOADED,
 };
 
+struct gl_handle {
+    u32 value;
+    b32 modified;
+};
+
 struct bitmap
 {
     u32 Width;
     u32 Height;
     s32 Pitch;
-    u32 Handle;
+    gl_handle Handle;
     v2 AlignPercent;
     
     void *Bits;
@@ -551,6 +556,8 @@ inline void
 EmptyMemoryArena(memory_arena *Arena) {
     Assert(Arena->TempMemCount == 0);
     Arena->CurrentSize = 0;
+
+    ClearMemory(Arena->Base, Arena->TotalSize);
 }
 
 inline char *Concat(memory_arena *Arena, char *A, char *B) {

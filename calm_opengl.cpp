@@ -17,6 +17,9 @@
 #define ERROR_INVALID_PROFILE_ARB               0x2096
 
 #define GL_SHADING_LANGUAGE_VERSION       0x8B8C
+#define GL_NUM_EXTENSIONS                 0x821D
+
+#define PRINT_OPENGL_ERROR() {u32 error = glGetError(); printf("%d\n", error);}
 
 struct opengl_info {
     b32 ModernContext;
@@ -38,31 +41,50 @@ inline opengl_info OpenGlGetExtensions(b32 ModernContext) {
     Result.Vendor = (char *)glGetString(GL_VENDOR);
     Result.Renderer = (char *)glGetString(GL_RENDERER);
     Result.Version = (char *)glGetString(GL_VERSION);
+
+    Assert(Result.Version);
+    s32 MaxVersion = (s32)Result.Version[0] - '0';
+
+    if(MaxVersion < 3) {
+        Result.ModernContext = false;
+    }
+
     if(Result.ModernContext) {
         Result.ShandingLanguageVersion = (char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
     } else {
         Result.ShandingLanguageVersion = "(none)";
     }
     
-    Result.Extensions = (char *)glGetString(GL_EXTENSIONS);
-    
-    char *At = Result.Extensions;
-    while(*At) {
-        char *Begin = At;
-        Assert(!IsWhiteSpace(*At));
-        while(!IsWhiteSpace(*At)) {
-            At++;
+    if(Result.ModernContext) {
+        GLint n;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+        for (GLint i = 0; i < n; i++) {
+            const u8 *StringExtension = glGetStringi(GL_EXTENSIONS, i);
         }
-        s32 Length = (s32)((intptr)At - (intptr)Begin);
-        if(0) {}
-        else if(DoStringsMatch("GL_ARB_framebuffer_sRGB", Begin, Length)) { Result.GL_ARB_framebuffer_sRGB_Ext = true; }
-        else if(DoStringsMatch("GL_EXT_texture_sRGB", Begin, Length)) { Result.GL_EXT_texture_sRGB_Ext = true; }
-        else if(DoStringsMatch("GL_ARB_texture_non_power_of_two", Begin, Length)) { Result.GL_ARB_texture_non_power_of_two_Ext = true; }
-        
-        while(IsWhiteSpace(*At)) {
-            At++;
+        Result.GL_ARB_framebuffer_sRGB_Ext = true;
+        Result.GL_EXT_texture_sRGB_Ext = true;
+        Result.GL_ARB_texture_non_power_of_two_Ext = true;
+    } else {
+        Result.Extensions = (char *)glGetString(GL_EXTENSIONS); //NOTE: depreacted for later versions of OpenGL
+        char *At = Result.Extensions;
+        while(*At) {
+            char *Begin = At;
+            Assert(!IsWhiteSpace(*At));
+            while(!IsWhiteSpace(*At)) {
+                At++;
+            }
+            s32 Length = (s32)((intptr)At - (intptr)Begin);
+            //TODO: Make the string match non duplicated
+            if(0) {}
+            else if(DoStringsMatch("GL_ARB_framebuffer_sRGB", Begin, Length)) { Result.GL_ARB_framebuffer_sRGB_Ext = true; }
+            else if(DoStringsMatch("GL_EXT_texture_sRGB", Begin, Length)) { Result.GL_EXT_texture_sRGB_Ext = true; }
+            else if(DoStringsMatch("GL_ARB_texture_non_power_of_two", Begin, Length)) { Result.GL_ARB_texture_non_power_of_two_Ext = true; }
+            
+            while(IsWhiteSpace(*At)) {
+                At++;
+            }
+            
         }
-        
     }
     
     return Result;
@@ -139,11 +161,12 @@ inline void OpenGlSetScreenSpace(s32 Width, s32 Height) {
 struct render_load_texture_info {
     bitmap *Bitmap;
     temp_memory MemoryMark;
+    GLuint TextureHandle;
 };
 
 static void OpenGlLoadTexture(bitmap *Bitmap, u32 TextureHandleIndex) {
     
-    Assert(!Bitmap->Handle);
+    Assert(!Bitmap->Handle.value);
     Assert(Bitmap->LoadState == RESOURCE_LOADING);
     glBindTexture(GL_TEXTURE_2D, TextureHandleIndex); 
     
@@ -159,16 +182,18 @@ static void OpenGlLoadTexture(bitmap *Bitmap, u32 TextureHandleIndex) {
     MemoryBarrier();
     _ReadWriteBarrier();
     
-    Bitmap->Handle = TextureHandleIndex;
+    Assert(!Bitmap->Handle.modified);
+    Bitmap->Handle.value = TextureHandleIndex;
+    Bitmap->Handle.modified = true;
     Bitmap->LoadState = RESOURCE_LOADED;
 }
 
 THREAD_WORK_FUNCTION(OpenGlLoadTextureThreadWork) {
-    render_load_texture_info *Info = (render_load_texture_info *)Data;
+   render_load_texture_info *Info = (render_load_texture_info *)Data;
     Assert(Info->Bitmap->LoadState == RESOURCE_LOADING);
-    GLuint TextureHandle;
-    glGenTextures(1, &TextureHandle);
-    OpenGlLoadTexture(Info->Bitmap, TextureHandle);
+    // GLuint TextureHandle;
+    // glGenTextures(1, &TextureHandle);
+    OpenGlLoadTexture(Info->Bitmap, Info->TextureHandle);
     
     MemoryBarrier();
     _ReadWriteBarrier();
@@ -236,12 +261,11 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
                     
                     if(Bitmap->LoadState == RESOURCE_LOADED) 
                     {
-                        Assert(Bitmap->Handle);
-                        glBindTexture(GL_TEXTURE_2D, Bitmap->Handle); 
+                        Assert(Bitmap->Handle.value);
+                        glBindTexture(GL_TEXTURE_2D, Bitmap->Handle.value); 
                         
                         OpenGlDrawRectangle(MinP, MaxP, Info->Color);
                     } 
-                    
                     
                     At += sizeof(render_element_header) + sizeof(render_element_bitmap);
                 } break;

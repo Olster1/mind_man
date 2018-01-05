@@ -11,6 +11,8 @@
 #define MAX_BITMAP_WIDTH 32
 #define MAX_BITMAP_HEIGHT MAX_BITMAP_WIDTH
 #include "calm_font.h"
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
 
 internal void
 Win32WriteFontFile()

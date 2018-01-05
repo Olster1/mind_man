@@ -12,6 +12,8 @@
 
 
 #include <SDL2/SDL.h>
+#include <OpenGL/gl.h>
+#include <OpenGL/gl3.h>
 #include <OpenGL/glu.h>
 #include "calm_platform.h"
 #include "calm_sdl.h"
@@ -54,6 +56,12 @@ SDLGetSecondsElapsed(s64 CurrentCount, s64 LastCount)
 
 size_t PlatformGetFileSize(SDL_RWops *FileHandle) {
     size_t Result = SDL_RWseek(FileHandle, 0, RW_SEEK_END);
+    if(Result < 0) {
+        Assert(!"Seek Error");
+    }
+    if(SDL_RWseek(FileHandle, 0, RW_SEEK_SET) < 0) {
+        Assert(!"Seek Error");
+    }
     return Result;
 }
 
@@ -181,16 +189,18 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
     {
         Result.Size = PlatformGetFileSize(FileHandle);
         Result.Data = malloc(Result.Size);
-        
-        if(SDL_RWread(FileHandle, Result.Data, 1, Result.Size) == Result.Size)
+        size_t ReturnSize = SDL_RWread(FileHandle, Result.Data, 1, Result.Size);
+        if(ReturnSize == Result.Size)
         {
             //NOTE(Oliver): Successfully read
-        }
-        else
-        {
+        } else {
             Assert(!"Couldn't read file");
             free(Result.Data);
         }
+    } else {
+        Assert(!"Couldn't open file");
+        const char *Error = SDL_GetError();
+        printf("%s\n", Error);
     }
     
     SDL_RWclose(FileHandle);
@@ -204,25 +214,33 @@ PlatformInitOpenGL(SDL_Window *WindowHandle) {
 
     SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
     SDL_GLContext RenderContext = SDL_GL_CreateContext( WindowHandle );
+    //opengl_info OpenGlInfo = OpenGlGetExtensions(true);
 
-    if(SDL_GL_MakeCurrent(WindowHandle, RenderContext)) {
-        
-        b32 IsModernContext = true;
-        OpenGlInit(IsModernContext);
+    if(RenderContext) {
+        if(SDL_GL_MakeCurrent(WindowHandle, RenderContext) >= 0) {
+            
+            b32 IsModernContext = true;
+            OpenGlInit(IsModernContext);
 
-        if( SDL_GL_SetSwapInterval(SWAP_BUFFER_INTERVAL) >= 0 ) {
-            Result = RenderContext;
+            if( SDL_GL_SetSwapInterval(SWAP_BUFFER_INTERVAL) >= 0 ) {
+                Result = RenderContext;
+            } else {
+                InvalidCodePath;
+            }
         } else {
+            printf("Failed to make Context current: %s", SDL_GetError());
             InvalidCodePath;
         }
+    } else {
+        printf("Failed to create Context: %s", SDL_GetError());
+        InvalidCodePath;
     }
         
     return Result;
 }
 
 internal void
-SDLFillSoundBuffer(PlatformSoundOutput *SoundOutput, game_output_sound_buffer *SourceBuffer){
-    s32 BytesToWrite = SourceBuffer->SamplesToWrite*SoundOutput->BytesPerSample;
+SDLFillSoundBuffer(game_output_sound_buffer *SourceBuffer, u32 BytesToWrite){
     SDL_QueueAudio(1, SourceBuffer->Samples, BytesToWrite);
 }
 
@@ -246,9 +264,11 @@ initAudio(uint32 SamplesPerSecond, uint32 sizeOfBuffer) {
 void updateButtonState(game_button *Button, b32 wasReleased, b32 wasPressed, b32 repeat) {
     if (wasReleased) {
         Button->FrameCount++;
+        Button->IsDown = false;
     } else if (wasPressed) {
+        Button->IsDown = true;
         if(repeat) {
-            Button->IsDown = true;
+            
         } else {
             Button->FrameCount++;
         }
@@ -258,11 +278,12 @@ void updateButtonState(game_button *Button, b32 wasReleased, b32 wasPressed, b32
 #include <stdarg.h>
 inline void SDLGetButtonState(game_button *Button, u32 NumberOfKeys, SDL_Event *Event, ...) {
     SDL_Keycode KeyCode = Event->key.keysym.sym;
-        
+     
     va_list KeyFlags;
     va_start(KeyFlags, NumberOfKeys);
     fori_count(NumberOfKeys) {
-        if(KeyCode == va_arg(KeyFlags, u32)) {
+        u32 TestCode = va_arg(KeyFlags, u32);
+        if(KeyCode == TestCode) {
             b32 WasDown = false;
             b32 wasReleased = Event->key.state == SDL_RELEASED;
             b32 wasPressed = Event->key.state == SDL_PRESSED;
@@ -274,7 +295,7 @@ inline void SDLGetButtonState(game_button *Button, u32 NumberOfKeys, SDL_Event *
 }
 
 //TODO(ollie): Make safe for threads other than the main thread to add stuff
-PLATFORM_PUSH_WORK_ONTO_QUEUE(Win32PushWorkOntoQueue) {
+PLATFORM_PUSH_WORK_ONTO_QUEUE(Win32PushWorkOntoQueue) { //NOT THREAD SAFE. OTHER THREADS CAN'T ADD TO QUEUE
     for(;;)
     {
         u32 OnePastTheHead = (Info->IndexToAddTo.value + 1) % ArrayCount(Info->WorkQueue);
@@ -342,6 +363,14 @@ Win32DoThreadWork(thread_info *Info)
 
 int PlatformThreadEntryPoint(void *Info_) {
     thread_info *Info = (thread_info *)Info_;
+
+    Assert(Info->WindowHandle);
+    Assert(Info->ContextForThread);
+    if(SDL_GL_MakeCurrent(Info->WindowHandle, Info->ContextForThread) >= 0) {
+        //Success!!
+    } else {
+        InvalidCodePath;
+    }
     
     for(;;) {
         Win32DoThreadWork(Info);
@@ -386,8 +415,11 @@ int main(int argCount, char *args[]) {
         u32 Height = 540;
 #endif
             //Use OpenGL 2.1
-        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
+        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 2 );
+        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 1 );
+        //SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+
 
         //Create window
         SDL_Window *WindowHandle = SDL_CreateWindow( "SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, Width, Height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN );
@@ -428,8 +460,6 @@ int main(int argCount, char *args[]) {
                 ++CoreIndex)
             {
                 SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
-
-                        
                 SDL_GLContext ContextForThisThread = SDL_GL_CreateContext(WindowHandle);
                 
                 ThreadInfo.ContextForThread = ContextForThisThread;
@@ -495,18 +525,27 @@ int main(int argCount, char *args[]) {
             b32 SoundIsValid = false;
             b32 FirstTimeInGameLoop = true;
             s64 AudioFlipWallClock = SDLGetTimeCount();
+
+            v2i CursorPos = {};
+
             while(GlobalRunning)
             {
                 ClearMemory(GameKeys, sizeof(GameKeys));
                 
-                v2i CursorPos = {};
+                for(u32 Index = 0;
+                    Index < ArrayCount(GameMemory.GameButtons);
+                    Index++) {
+                    GameMemory.GameButtons[Index].FrameCount = 0;                   
+                }
+
+                
                 SDL_Event Event;
                 while( SDL_PollEvent( &Event ) != 0 )
                 {
                     //User requests quit
                     if( Event.type == SDL_QUIT )
                     {
-                        GlobalRunning = true;
+                        GlobalRunning = false;
                     }
                     //Handle keypress with current mouse position
                     else if(Event.type == SDL_MOUSEBUTTONDOWN || Event.type == SDL_MOUSEBUTTONUP) {
@@ -516,9 +555,8 @@ int main(int argCount, char *args[]) {
                         } else if(Event.button.button == SDL_BUTTON_RIGHT) {
                             MouseButton = GameMemory.GameButtons + Button_RightMouse;
                         }
-
-                        b32 wasPressed = (Event.type == SDL_MOUSEBUTTONUP);
-                        b32 wasReleased = (Event.type == SDL_MOUSEBUTTONDOWN);
+                        b32 wasPressed = (Event.type == SDL_MOUSEBUTTONDOWN);
+                        b32 wasReleased = (Event.type == SDL_MOUSEBUTTONUP);
                         b32 repeat = false;//TODO inclomplete
                         if(MouseButton) {
                             updateButtonState(MouseButton, wasReleased, wasPressed, repeat);
@@ -527,10 +565,11 @@ int main(int argCount, char *args[]) {
                     else if( Event.type == SDL_MOUSEMOTION ) {
                         u32 MouseState = SDL_GetMouseState( &CursorPos.X, &CursorPos.Y);
                     } else if(Event.type == SDL_KEYDOWN || Event.type == SDL_KEYUP) {
-                        SDLGetButtonState(GameMemory.GameButtons + Button_Up, 2, &Event, SDLK_UP, 0x57);
-                        SDLGetButtonState(GameMemory.GameButtons + Button_Down, 2, &Event, SDLK_DOWN, 0x53);
-                        SDLGetButtonState(GameMemory.GameButtons + Button_Left, 2, &Event, SDLK_LEFT, 0x41);
-                        SDLGetButtonState(GameMemory.GameButtons + Button_Right, 2, &Event, SDLK_RIGHT, 0x44);
+
+                        SDLGetButtonState(GameMemory.GameButtons + Button_Up, 2, &Event, SDLK_UP, SDLK_w);
+                        SDLGetButtonState(GameMemory.GameButtons + Button_Down, 2, &Event, SDLK_DOWN, SDLK_s);
+                        SDLGetButtonState(GameMemory.GameButtons + Button_Left, 2, &Event, SDLK_LEFT, SDLK_a);
+                        SDLGetButtonState(GameMemory.GameButtons + Button_Right, 2, &Event, SDLK_RIGHT, SDLK_d);
                         
                         //////////////////
                         // TODO(OLIVER): Replace this using the asci array in order to get the nice lag time on key press
@@ -566,13 +605,7 @@ int main(int argCount, char *args[]) {
         
                     }
                 }                
-                for(u32 Index = 0;
-                    Index < ArrayCount(GameMemory.GameButtons);
-                    Index++)
-                {
-                    GameMemory.GameButtons[Index].FrameCount = 0;                   
-                    GameMemory.GameButtons[Index].IsDown = 0;                   
-                }
+                
                 
                 GameMemory.MouseX = (r32)CursorPos.X;
                 GameMemory.MouseY = FrameBufferBitmap.Height - (r32)CursorPos.Y;
@@ -581,16 +614,17 @@ int main(int argCount, char *args[]) {
                 
                 //real32 SecondsSinceFlip = SDLGetSecondsElapsed(SDLGetTimeCount(), AudioFlipWallClock);
                 
-                u32 BytesToWrite = 4086;
+                int TargetQueueBytes = 1.6*soundOutput.sampleRate * soundOutput.BytesPerSample; //MAX one second of latency
+                u32 BytesToWrite = TargetQueueBytes - SDL_GetQueuedAudioSize(1);
                 game_output_sound_buffer gameSoundBuffer = {};
                 gameSoundBuffer.SamplesToWrite = Align8(BytesToWrite / soundOutput.BytesPerSample);
                 gameSoundBuffer.SampleRate = soundOutput.sampleRate;
                 gameSoundBuffer.Samples = soundSamples;
                 
-                BytesToWrite = gameSoundBuffer.SamplesToWrite * soundOutput.BytesPerSample;
-                
-                GameGetSoundSamples(&GameMemory, &gameSoundBuffer);
-                SDLFillSoundBuffer(&soundOutput, &gameSoundBuffer);
+                if(BytesToWrite > 0) {
+                    GameGetSoundSamples(&GameMemory, &gameSoundBuffer);
+                    SDLFillSoundBuffer(&gameSoundBuffer, BytesToWrite);
+                }
                 /////////////////////////////////////////////////////////////////////////////
                 r32 SecondsElapsed = SDLGetSecondsElapsed(SDLGetTimeCount(), LastCounter);
 #if SLEEP

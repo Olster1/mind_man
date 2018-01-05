@@ -1,5 +1,5 @@
-#define MemoryBarrier() { SDL_atomic_t A = {}; SDL_AtomicAdd(&A, 1); }
-#define _ReadWriteBarrier() { MemoryBarrier(); SDL_CompilerBarrier(); }
+#define MemoryBarrier()  __sync_synchronize()
+#define _ReadWriteBarrier() { SDL_CompilerBarrier(); }
 
 struct PlatformSoundOutput{
     int32 sampleRate;
