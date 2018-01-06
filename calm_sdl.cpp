@@ -423,8 +423,8 @@ int main(int argCount, char *args[]) {
         u32 Height = 540;
 #endif
         //Use OpenGL 2.1
-        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
-        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
+        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 2 );
+        SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 1 );
         //SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
         
@@ -481,14 +481,9 @@ int main(int argCount, char *args[]) {
             SDL_GLContext ctx1 = SDL_GL_GetCurrentContext();
 
             if(ctx1 != ctx) {
-                BreakPoint;
+                InvalidCodePath;
             }
-
-            if(SDL_GL_MakeCurrent(WindowHandle, MainRenderContext) < 0) {
-                printf("%s\n", "wasError");
-            }
-            
-            
+        
             GlobalTimeFrequencyDatum = SDL_GetPerformanceFrequency();
             
             ///////Render Groups we pass to the game layer/////
