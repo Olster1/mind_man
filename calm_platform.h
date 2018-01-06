@@ -229,7 +229,7 @@ struct thread_work
 
 struct thread_info
 {
-#if MAC_PORT
+#if SDL_PORT
     SDL_sem *Semaphore;
     SDL_Window *WindowHandle;
     thread_work WorkQueue[256];

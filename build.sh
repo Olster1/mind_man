@@ -1,4 +1,4 @@
-
+@echo off
 gcc -w meta_generator.cpp -o meta_program.out -std=gnu++11 -DMAC_PORT=1 -O0
 ./meta_program.out
 pushd ../../art_assets
