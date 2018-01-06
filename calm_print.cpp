@@ -215,6 +215,6 @@
      u8 *Arguments = ((u8 *)&FormatString) + sizeof(FormatString);
      
      //sprintf_s(TextBuffer, TextBufferSize, FormatString, *Arguments);
-     s32 SizeOfString = Print__(TextBuffer, TextBufferSize, FormatString, Arguments);
+     s32 SizeOfString = snprintf(TextBuffer, TextBufferSize, FormatString, Arguments);//Print__(TextBuffer, TextBufferSize, FormatString, Arguments);
      return SizeOfString;
  }

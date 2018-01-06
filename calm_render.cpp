@@ -598,9 +598,6 @@ void PushBitmap(render_group *Group, v3 Pos, bitmap *Bitmap, r32 WidthInWorldSpa
                 Data->Bitmap = Bitmap;
                 Data->MemoryMark = TempMem;
                 
-                glGenTextures(1, &Data->TextureHandle);
-                
-                
                 Group->Memory->PlatformPushWorkOntoQueue(Group->ThreadInfo, OpenGlLoadTextureThreadWork, Data);
 #else 
                 GLuint id;

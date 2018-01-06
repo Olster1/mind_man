@@ -18,7 +18,7 @@
 #define UPDATE_CAMERA_POS 1
 #define DELETE_PHILOSOPHER_ON_CAPTURE 0
 
-#define LOAD_LEVEL_FROM_FILE 0
+#define LOAD_LEVEL_FROM_FILE 1
 
 /////////////////////////////////////////
 

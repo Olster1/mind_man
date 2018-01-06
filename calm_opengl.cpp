@@ -207,9 +207,9 @@ THREAD_WORK_FUNCTION(OpenGlLoadTextureThreadWork) {
     
     render_load_texture_info *Info = (render_load_texture_info *)Data;
     Assert(Info->Bitmap->LoadState == RESOURCE_LOADING);
-    // GLuint TextureHandle;
-    // glGenTextures(1, &TextureHandle);
-    OpenGlLoadTexture(Info->Bitmap, Info->TextureHandle);
+    GLuint TextureHandle;
+    glGenTextures(1, &TextureHandle);
+    OpenGlLoadTexture(Info->Bitmap, TextureHandle);
     
     MemoryBarrier();
     _ReadWriteBarrier();
@@ -254,6 +254,7 @@ void OpenGlRenderToOutput(render_group *Group, b32 draw) {
             };
             
             glLoadMatrixf(ProjMat);
+            glBindTexture(GL_TEXTURE_2D, 0);
             
             render_element_header *Header = (render_element_header *)At;
             switch(Header->Type) {

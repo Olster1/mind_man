@@ -214,7 +214,6 @@ PlatformInitOpenGL(SDL_Window *WindowHandle) {
 
     SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
     SDL_GLContext RenderContext = SDL_GL_CreateContext( WindowHandle );
-    //opengl_info OpenGlInfo = OpenGlGetExtensions(true);
 
     if(RenderContext) {
         if(SDL_GL_MakeCurrent(WindowHandle, RenderContext) >= 0) {
@@ -367,6 +366,7 @@ int PlatformThreadEntryPoint(void *Info_) {
     Assert(Info->WindowHandle);
     Assert(Info->ContextForThread);
     if(SDL_GL_MakeCurrent(Info->WindowHandle, Info->ContextForThread) >= 0) {
+        printf("%s\n", "Success");
         //Success!!
     } else {
         InvalidCodePath;
@@ -454,7 +454,8 @@ int main(int argCount, char *args[]) {
             u32 ThreadCount = 0;
             
             s32 CoreCount = Min(NumberOfUnusedProcessors, ArrayCount(Threads));
-            
+            SDL_GLContext ctx = SDL_GL_GetCurrentContext();
+
             for(u32 CoreIndex = 0;
                 CoreIndex < (u32)CoreCount;
                 ++CoreIndex)
@@ -465,6 +466,15 @@ int main(int argCount, char *args[]) {
                 ThreadInfo.ContextForThread = ContextForThisThread;
                 Assert(ThreadCount < ArrayCount(Threads));
                 Threads[ThreadCount++] = SDL_CreateThread(PlatformThreadEntryPoint, "", &ThreadInfo);
+            }
+            SDL_GLContext ctx1 = SDL_GL_GetCurrentContext();
+
+            if(ctx1 != ctx) {
+                BreakPoint;
+            }
+
+            if(SDL_GL_MakeCurrent(WindowHandle, MainRenderContext) < 0) {
+                printf("%s\n", "wasError");
             }
             
             GlobalTimeFrequencyDatum = SDL_GetPerformanceFrequency();
@@ -659,6 +669,7 @@ int main(int argCount, char *args[]) {
                     TextToOutput(&OrthoRenderGroup, GameMemory.DebugFont, TextBuffer, 0, 0, Rect2(0, 0, (r32)Width, (r32)Height), V4(1, 1, 1, 1), &Opt);
                 }
 #endif
+
                 OpenGlRenderToOutput(&RenderGroup, true);
                 OpenGlRenderToOutput(&OrthoRenderGroup, true);
                 
