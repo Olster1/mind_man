@@ -1,5 +1,7 @@
+#if MAC_PORT
 #define MemoryBarrier()  __sync_synchronize()
 #define _ReadWriteBarrier() { SDL_CompilerBarrier(); }
+#endif
 
 struct PlatformSoundOutput{
     int32 sampleRate;

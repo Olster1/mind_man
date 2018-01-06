@@ -1050,8 +1050,18 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
         entity *Camera = AddEntity(GameState, V2(0, 0), V2(0, 0), Entity_Camera, GameState->EntityIDAt++);
         Camera->Collides = false;
         
-        //AddWorldChunks(GameState, 200, 0, 100, ChunkLight);
-        //AddWorldChunks(GameState, 200, -100, 0, ChunkDark);
+        
+#if CREATE_PHILOSOPHER
+        entity *Philosopher = AddEntity(GameState, V2(2, 2), V2(1, 1), Entity_Philosopher, GameState->EntityIDAt++);
+        Philosopher->MovePeriod = 0.4f;
+        AddChunkType(Philosopher, ChunkLight);
+        
+        v2i PhilosopherPos = GetGridLocation(Philosopher->Pos);
+        GetOrCreateWorldChunk(GameState->Chunks, PhilosopherPos.X, PhilosopherPos.Y, &GameState->MemoryArena, ChunkLight);
+#endif
+        
+        AddWorldChunks(GameState, 200, 0, 100, ChunkLight);
+        AddWorldChunks(GameState, 200, -100, 0, ChunkDark);
         
         //Create a whole load of blocks
         v2 Pos = {};
@@ -1071,16 +1081,9 @@ internal void LoadLevelFile(char *FileName, game_memory *Memory, game_state *Gam
         // NOTE(OLIVER): Make sure player is on a valid tile
         v2i PlayerPos = GetGridLocation(Player->Pos);
         GetOrCreateWorldChunk(GameState->Chunks, PlayerPos.X, PlayerPos.Y, &GameState->MemoryArena, ChunkDark, &GameState->ChunkFreeList);
-#if CREATE_PHILOSOPHER
-        entity *Philosopher = InitEntity(GameState, V2(2, 2), V2(1, 1), Entity_Philosopher, GameState->EntityIDAt++);
-        Philosopher->MovePeriod = 0.4f;
-        AddChunkType(Philosopher, ChunkLight);
-        
-        v2i PhilosopherPos = GetGridLocation(Philosopher->Pos);
-        GetOrCreateWorldChunk(GameState->Chunks, PhilosopherPos.X, PhilosopherPos.Y, &GameState->MemoryArena, ChunkLight);
-#endif
         
     }
+    
     Memory->PlatformEndFile(Handle);
     
 }
@@ -1152,7 +1155,7 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         
         GameState->MossBlockBitmap = LoadBitmap(Memory, 0, "moss_block1.bmp");
 #endif
-        GameState->MagicianHandBitmap = LoadBitmap(Memory, 0, "magician_hand.bmp");
+        //GameState->MagicianHandBitmap = LoadBitmap(Memory, 0, "magician_hand.bmp");
         
         GameState->DarkTiles[NULL_TILE] = LoadBitmap(Memory, 0, "static_center.bmp");
         
@@ -1448,7 +1451,9 @@ GameUpdateAndRender(bitmap *Buffer, game_memory *Memory, render_group *OrthoRend
         if(Player) {
             
             AddAnimationToList(GameState, &GameState->MemoryArena, Player, FindAnimation(GameState->KnightAnimations, GameState->KnightAnimationCount, "Knight_Idle"));
-        }
+        } 
+        
+        
         
         entity *Phil = FindFirstEntityOfType(GameState, Entity_Philosopher);
         
